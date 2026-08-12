@@ -4,6 +4,7 @@ import { LookupPage } from './pages/Lookup';
 import { ProfilePage } from './pages/Profile';
 import { DashboardPage } from './pages/Dashboard';
 import { NotesPage } from './pages/Notes';
+import { TableauPage } from './pages/Tableau';
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/pokemon/:id" element={<ProfilePage />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/notes" element={<NotesPage />} />
+          <Route path="/tableau" element={<TableauPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

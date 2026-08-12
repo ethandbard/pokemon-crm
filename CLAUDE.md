@@ -3,7 +3,7 @@
 A CRM-style sandbox for looking up Pokémon, tracking notes, and viewing
 performance stats. Modelled on the patterns used in student-advising tools:
 a searchable record list, a per-record profile with notes and status flags, a
-cross-record note feed, and an analytics dashboard.
+cross-record note feed, an analytics dashboard, and an embedded BI view.
 
 **Keep this file current.** When you add a route, table, page, or convention,
 update the matching section here in the same change.
@@ -72,7 +72,8 @@ pokemon-crm/
             ├── Lookup.tsx    # searchable/filterable/sortable table
             ├── Profile.tsx   # detail + notes + status flags
             ├── Dashboard.tsx # EDA charts
-            └── Notes.tsx     # cross-Pokémon note feed
+            ├── Notes.tsx     # cross-Pokémon note feed
+            └── Tableau.tsx   # embedded Tableau Public workbook
 ```
 
 ---
@@ -194,6 +195,32 @@ Charts follow a fixed set of rules — match them when adding one:
 - **The Pokémon type colors in `lib/format.ts` are for badges only, never chart
   series.** They're a domain convention players recognise, and 18 categories is
   well past what any palette can keep distinguishable.
+
+### The Tableau embed (`pages/Tableau.tsx`)
+
+Embeds the Tableau Public workbook `shared/K7RTFZCTW`. Points worth knowing
+before touching it:
+
+- **It does not use Tableau's share snippet.** That snippet loads the legacy
+  `viz_v1.js`, which works by scanning the document for
+  `<object class="tableauViz">` and replacing it — which fights React for
+  ownership of the DOM and double-runs under StrictMode. This uses the current
+  **Embedding API v3** (`tableau.embedding.3.latest.min.js`) and a
+  `<tableau-viz>` custom element pointed at the same viz.
+- **The element is created imperatively**, not in JSX, so React never owns it
+  and teardown is unambiguous. That also avoids declaring a custom element in
+  JSX's `IntrinsicElements`.
+- **The API script is loaded once** and cached in a module-level promise, so
+  navigating away and back doesn't refetch it. A rejection is *not* cached, so
+  the retry button can try the network again.
+- **The viz is pinned to its authored 1600 × 927** and the card scrolls
+  horizontally. Tableau does **not** scale a fixed-size dashboard down to fit —
+  given a narrower frame it renders at native size behind its own internal
+  scrollbars, which is unreadable. Below a 500px container the workbook switches
+  to its phone layout, which is much taller (`PHONE_HEIGHT`). If you swap in a
+  different workbook, update those constants to match its published size.
+- This page is **not backed by the CRM database** — it's an external view, and
+  the card subtitle says so.
 
 ---
 

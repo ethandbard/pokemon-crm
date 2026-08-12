@@ -67,6 +67,17 @@ const NAV_ITEMS: NavItem[] = [
       </>,
     ),
   },
+  {
+    to: '/tableau',
+    label: 'Tableau Dashboard',
+    icon: icon(
+      <>
+        <rect x="3" y="3.5" width="18" height="17" rx="2" />
+        <path d="M3 9.5h18" />
+        <path d="M11 9.5v11" />
+      </>,
+    ),
+  },
 ];
 
 export function Sidebar() {

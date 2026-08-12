@@ -8,6 +8,7 @@ advising tools.
 - **Pokémon Profile** — full detail view with base-stat chart, notes, and status flags
 - **Performance Dashboard** — EDA charts across the dataset (distributions, type and generation breakdowns, correlations)
 - **Notes** — cross-Pokémon note feed, sortable and filterable
+- **Tableau Dashboard** — an embedded Tableau Public workbook alongside the in-app analytics
 
 Vite + React + TypeScript + Tailwind on the front, Express + Drizzle + PostgreSQL
 behind it, Recharts for the visualisations.
