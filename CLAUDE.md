@@ -415,12 +415,15 @@ before touching it:
 
 ```bash
 npm install
-cp .env.example .env      # then edit
-npm run db:migrate        # create tables
-npm run seed              # import from PokeAPI (~2 min for all 1,025)
-npm run seed:trainers     # create trainers + rosters (needs `seed` first)
+cp .env.example .env      # then edit DATABASE_URL
+npm run setup             # db:create → db:migrate → seed → seed:trainers
 npm run dev               # API on :4000, web on :5173
 ```
+
+`db:create` exists because `db:migrate` connects straight to the app database
+and fails on a fresh machine with `database "pokemon_crm" does not exist`. It
+connects to the `postgres` maintenance database instead and issues a
+CREATE DATABASE. See README for the full first-run walkthrough.
 
 Other scripts: `npm run db:generate` (new migration from schema changes),
 `npm run db:push` (dev-only direct sync), `npm run db:studio`,
