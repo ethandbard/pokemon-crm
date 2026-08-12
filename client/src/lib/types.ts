@@ -6,6 +6,8 @@
 
 export type ActivityKind = 'caught' | 'favorite' | 'wishlist' | 'flagged' | 'reviewed';
 
+export type RosterStatus = 'starter' | 'active' | 'reserve' | 'retired';
+
 export interface Pagination {
   page: number;
   pageSize: number;
@@ -35,6 +37,8 @@ export interface PokemonListItem {
   spriteUrl: string | null;
   noteCount: number;
   activityKinds: ActivityKind[];
+  /** Names of every trainer carrying this Pokémon on their roster. */
+  trainerNames: string[];
 }
 
 export interface PokemonListResponse {
@@ -46,6 +50,72 @@ export interface FilterOptions {
   types: string[];
   generations: number[];
   activityKinds: ActivityKind[];
+  trainers: { id: number; name: string }[];
+}
+
+export interface Trainer {
+  id: number;
+  name: string;
+  region: string | null;
+  specialty: string | null;
+  email: string | null;
+  bio: string | null;
+}
+
+/** Trainer list row — carries the headline roster figures for the selector. */
+export interface TrainerListItem extends Trainer {
+  rosterSize: number;
+  activeCount: number;
+  avgBaseStatTotal: number;
+}
+
+export interface RosterMember {
+  id: number;
+  pokemonId: number;
+  nickname: string | null;
+  level: number | null;
+  status: RosterStatus;
+  acquiredAt: string;
+  name: string;
+  displayName: string;
+  generation: number;
+  type1: string;
+  type2: string | null;
+  hp: number;
+  attack: number;
+  defense: number;
+  specialAttack: number;
+  specialDefense: number;
+  speed: number;
+  baseStatTotal: number;
+  isLegendary: boolean;
+  spriteUrl: string | null;
+  noteCount: number;
+  activityKinds: ActivityKind[];
+}
+
+export interface TrainerDashboardResponse {
+  trainer: Trainer & { createdAt: string; updatedAt: string };
+  roster: RosterMember[];
+  summary: {
+    roster_size: number;
+    active_count: number;
+    avg_base_stat_total: number;
+    max_base_stat_total: number;
+    avg_level: number;
+    legendary_count: number;
+    distinct_types: number;
+  } | null;
+  typeBreakdown: { type: string; count: number }[];
+  statAverages: { stat: string; avg: number }[];
+  /** Notes on any Pokémon in this trainer's roster. */
+  notes: (NoteWithPokemon & { nickname: string | null })[];
+  /** Status flags on any Pokémon in this trainer's roster. */
+  activity: (ActivityRecord & {
+    pokemonName: string;
+    pokemonSpriteUrl: string | null;
+    nickname: string | null;
+  })[];
 }
 
 /** Full record from the `pokemon` table. */
@@ -105,6 +175,16 @@ export interface PokemonProfileResponse {
   pokemon: PokemonDetail;
   notes: Note[];
   activity: ActivityRecord[];
+  /** Trainers carrying this Pokémon — the roster relation, seen from the Pokémon side. */
+  trainers: {
+    rosterId: number;
+    trainerId: number;
+    trainerName: string;
+    region: string | null;
+    nickname: string | null;
+    level: number | null;
+    status: RosterStatus;
+  }[];
   neighbours: {
     previous: { id: number; displayName: string; spriteUrl: string | null } | null;
     next: { id: number; displayName: string; spriteUrl: string | null } | null;

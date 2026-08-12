@@ -124,9 +124,81 @@ export const activity = pgTable(
   ],
 );
 
+/**
+ * Where a roster member sits in the trainer's line-up. The advising analogue of
+ * an active/inactive caseload: `retired` keeps the history without counting
+ * toward the working roster.
+ */
+export const rosterStatus = pgEnum('roster_status', ['starter', 'active', 'reserve', 'retired']);
+
+/**
+ * A trainer — the advisor in the advising analogy. Trainers own rosters of
+ * Pokémon the way an advisor owns a caseload of students.
+ */
+export const trainers = pgTable(
+  'trainers',
+  {
+    id: serial('id').primaryKey(),
+    name: text('name').notNull(),
+    region: text('region'),
+    /** Type the trainer is known for — the rough equivalent of a department. */
+    specialty: text('specialty'),
+    email: text('email'),
+    bio: text('bio'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('trainers_name_idx').on(table.name),
+    index('trainers_region_idx').on(table.region),
+  ],
+);
+
+/**
+ * Join table between trainers and Pokémon — the roster itself.
+ *
+ * One row per (trainer, Pokémon): a roster tracks *which* species a trainer
+ * carries, so the same Pokémon can't appear twice on one roster (though it can
+ * appear on many different trainers' rosters).
+ */
+export const roster = pgTable(
+  'roster',
+  {
+    id: serial('id').primaryKey(),
+    trainerId: integer('trainer_id')
+      .notNull()
+      .references(() => trainers.id, { onDelete: 'cascade' }),
+    pokemonId: integer('pokemon_id')
+      .notNull()
+      .references(() => pokemon.id, { onDelete: 'cascade' }),
+    nickname: text('nickname'),
+    level: integer('level'),
+    status: rosterStatus('status').notNull().default('active'),
+    acquiredAt: timestamp('acquired_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('roster_trainer_pokemon_idx').on(table.trainerId, table.pokemonId),
+    index('roster_trainer_idx').on(table.trainerId),
+    index('roster_pokemon_idx').on(table.pokemonId),
+    index('roster_status_idx').on(table.status),
+  ],
+);
+
 export const pokemonRelations = relations(pokemon, ({ many }) => ({
   notes: many(notes),
   activity: many(activity),
+  roster: many(roster),
+}));
+
+export const trainersRelations = relations(trainers, ({ many }) => ({
+  roster: many(roster),
+}));
+
+export const rosterRelations = relations(roster, ({ one }) => ({
+  trainer: one(trainers, { fields: [roster.trainerId], references: [trainers.id] }),
+  pokemon: one(pokemon, { fields: [roster.pokemonId], references: [pokemon.id] }),
 }));
 
 export const notesRelations = relations(notes, ({ one }) => ({
@@ -143,3 +215,8 @@ export type Note = typeof notes.$inferSelect;
 export type NewNote = typeof notes.$inferInsert;
 export type Activity = typeof activity.$inferSelect;
 export type ActivityKind = (typeof activityKind.enumValues)[number];
+export type Trainer = typeof trainers.$inferSelect;
+export type NewTrainer = typeof trainers.$inferInsert;
+export type RosterEntry = typeof roster.$inferSelect;
+export type NewRosterEntry = typeof roster.$inferInsert;
+export type RosterStatus = (typeof rosterStatus.enumValues)[number];

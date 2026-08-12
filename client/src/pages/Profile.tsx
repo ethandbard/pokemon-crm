@@ -28,6 +28,7 @@ import { NoteActions, NoteComposer } from '../components/NoteEditor';
 import { PokemonQuickSearch } from '../components/PokemonQuickSearch';
 import {
   ACTIVITY_META,
+  ROSTER_STATUS_META,
   dexNumber,
   formatDate,
   formatHeight,
@@ -73,7 +74,7 @@ export function ProfilePage() {
 
   if (!data) return null;
 
-  const { pokemon, notes, activity, neighbours, ranking } = data;
+  const { pokemon, notes, activity, neighbours, ranking, trainers } = data;
   const activeKinds = new Set(activity.map((a) => a.kind));
   const lastReviewed = activity.find((a) => a.kind === 'reviewed')?.updatedAt ?? null;
 
@@ -283,6 +284,53 @@ export function ProfilePage() {
                     );
                   })}
               </ol>
+            )}
+          </Card>
+
+          <Card
+            title="On rosters"
+            subtitle={
+              trainers.length === 0
+                ? 'Not on any trainer roster'
+                : `Carried by ${trainers.length} ${trainers.length === 1 ? 'trainer' : 'trainers'}`
+            }
+          >
+            {trainers.length === 0 ? (
+              <EmptyState
+                title="Not on a roster"
+                description="No trainer currently carries this Pokémon."
+              />
+            ) : (
+              <ul className="space-y-2">
+                {trainers.map((entry) => {
+                  const meta = ROSTER_STATUS_META[entry.status];
+                  return (
+                    <li key={entry.rosterId}>
+                      <Link
+                        to={`/trainers${toQueryString({ trainerId: entry.trainerId })}`}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-hairline p-2.5 hover:border-brand hover:bg-plane"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-xs font-medium text-ink">
+                            {entry.trainerName}
+                          </span>
+                          <span className="block text-xs text-muted">
+                            {entry.region ?? 'Unknown region'}
+                            {entry.nickname && ` · “${entry.nickname}”`}
+                            {entry.level && ` · Lv ${entry.level}`}
+                          </span>
+                        </span>
+                        <span
+                          title={meta.hint}
+                          className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium ${meta.className}`}
+                        >
+                          {meta.label}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </Card>
 

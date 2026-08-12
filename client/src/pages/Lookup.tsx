@@ -28,6 +28,7 @@ const COLUMNS = [
   { key: 'specialDefense', label: 'SpD', numeric: true },
   { key: 'speed', label: 'Spe', numeric: true },
   { key: 'baseStatTotal', label: 'BST', numeric: true },
+  { key: null, label: 'Trainers', numeric: false },
   { key: null, label: 'CRM', numeric: false },
 ] as const;
 
@@ -39,6 +40,7 @@ export function LookupPage() {
   const [type, setType] = useState('');
   const [generation, setGeneration] = useState('');
   const [activity, setActivity] = useState('');
+  const [trainerId, setTrainerId] = useState(() => searchParams.get('trainerId') ?? '');
   const [sort, setSort] = useState('id');
   const [direction, setDirection] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
@@ -52,12 +54,13 @@ export function LookupPage() {
         type,
         generation,
         activity,
+        trainerId,
         sort,
         direction,
         page,
         pageSize: 25,
       })}`,
-    [debouncedSearch, type, generation, activity, sort, direction, page],
+    [debouncedSearch, type, generation, activity, trainerId, sort, direction, page],
   );
 
   const { data, loading, error, refetch } = useApi<PokemonListResponse>(listPath);
@@ -82,7 +85,7 @@ export function LookupPage() {
     };
   }
 
-  const hasFilters = Boolean(search || type || generation || activity);
+  const hasFilters = Boolean(search || type || generation || activity || trainerId);
 
   return (
     <div className="mx-auto max-w-[1400px] px-8 py-7">
@@ -140,6 +143,19 @@ export function LookupPage() {
           ))}
         </Select>
 
+        <Select
+          value={trainerId}
+          onChange={(e) => withReset(setTrainerId)(e.target.value)}
+          aria-label="Filter by trainer"
+        >
+          <option value="">All trainers</option>
+          {filters.data?.trainers.map((trainer) => (
+            <option key={trainer.id} value={trainer.id}>
+              {trainer.name}
+            </option>
+          ))}
+        </Select>
+
         {hasFilters && (
           <Button
             onClick={() => {
@@ -147,6 +163,7 @@ export function LookupPage() {
               setType('');
               setGeneration('');
               setActivity('');
+              setTrainerId('');
               setPage(1);
             }}
           >
@@ -246,6 +263,24 @@ export function LookupPage() {
                       <td className="px-3 py-2 text-right tabular-nums">{row.speed}</td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums">
                         {row.baseStatTotal}
+                      </td>
+                      <td className="px-3 py-2">
+                        {row.trainerNames.length === 0 ? (
+                          <span className="text-xs text-muted">—</span>
+                        ) : (
+                          <Link
+                            to={`/trainers${toQueryString({
+                              trainerId: filters.data?.trainers.find(
+                                (t) => t.name === row.trainerNames[0],
+                              )?.id,
+                            })}`}
+                            className="text-xs text-ink-2 hover:text-brand"
+                            title={row.trainerNames.join(', ')}
+                          >
+                            {row.trainerNames[0]}
+                            {row.trainerNames.length > 1 && ` +${row.trainerNames.length - 1}`}
+                          </Link>
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1.5 text-xs text-muted">

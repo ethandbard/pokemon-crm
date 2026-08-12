@@ -5,7 +5,8 @@ stats — a personal learning sandbox modelled after the patterns used in studen
 advising tools.
 
 - **Home** — landing page with live workspace counters and links into every section
-- **Pokémon Lookup** — searchable, filterable, sortable table of all 1,025 Pokémon
+- **Trainers** — pick a trainer to open a dashboard of their roster, stats, and note/activity history
+- **Pokémon Lookup** — searchable, filterable, sortable table of all 1,025 Pokémon (filterable by trainer)
 - **Pokémon Profile** — base-stat chart, notes, an interactive activity log, and a quick-search to jump between Pokémon
 - **Performance Dashboard** — EDA charts across the dataset (distributions, type and generation breakdowns, correlations)
 - **Notes** — cross-Pokémon note feed, sortable and filterable
@@ -43,6 +44,12 @@ a fast Gen-1-only run.
 npm run seed
 ```
 
+Then create the trainers and their rosters:
+
+```bash
+npm run seed:trainers
+```
+
 Start both servers:
 
 ```bash
@@ -59,6 +66,7 @@ The app is at http://localhost:5173 and the API at http://localhost:4000.
 | `npm run build` | Typecheck and build both workspaces |
 | `npm run typecheck` | Typecheck only |
 | `npm run seed` | Import Pokémon from PokeAPI (idempotent) |
+| `npm run seed:trainers` | Create trainers and rosters (idempotent; run after `seed`) |
 | `npm run db:generate` | Generate a migration from schema changes |
 | `npm run db:migrate` | Apply pending migrations |
 | `npm run db:studio` | Open Drizzle Studio |

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { activity, notes, pokemon } from '../db/schema.js';
+import { activity, notes, pokemon, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound } from '../http.js';
 import { POKEMON_TYPES } from '../constants.js';
 
@@ -32,6 +32,8 @@ const listQuerySchema = z.object({
   legendary: z.enum(['true', 'false']).optional(),
   /** Filter to Pokémon carrying a given status flag. */
   activity: z.enum(activity.kind.enumValues).optional(),
+  /** Filter to Pokémon on a given trainer's roster. */
+  trainerId: z.coerce.number().int().min(1).optional(),
   minBaseStatTotal: z.coerce.number().int().min(0).max(1200).optional(),
   maxBaseStatTotal: z.coerce.number().int().min(0).max(1200).optional(),
   sort: z.enum(Object.keys(SORTABLE) as [keyof typeof SORTABLE]).default('id'),
@@ -74,7 +76,12 @@ pokemonRouter.get(
     }
     if (query.activity) {
       filters.push(
-        sql`exists (select 1 from ${activity} where ${activity.pokemonId} = ${pokemon.id} and ${activity.kind} = ${query.activity})`,
+        sql`exists (select 1 from ${activity} a where a.pokemon_id = ${pokemon}.id and a.kind = ${query.activity})`,
+      );
+    }
+    if (query.trainerId !== undefined) {
+      filters.push(
+        sql`exists (select 1 from ${roster} r where r.pokemon_id = ${pokemon}.id and r.trainer_id = ${query.trainerId})`,
       );
     }
 
@@ -105,10 +112,20 @@ pokemonRouter.get(
           isLegendary: pokemon.isLegendary,
           isMythical: pokemon.isMythical,
           spriteUrl: pokemon.spriteUrl,
-          noteCount: sql<number>`(select count(*)::int from ${notes} where ${notes.pokemonId} = ${pokemon.id})`,
+          /*
+           * Correlated subqueries must alias their own tables and qualify the
+           * OUTER reference as `${pokemon}.id`. Drizzle renders `${pokemon.id}`
+           * as a bare `"id"`, which Postgres resolves against the innermost
+           * scope — so an unqualified form silently compares the subquery's own
+           * id column instead of the outer row's.
+           */
+          noteCount: sql<number>`(select count(*)::int from ${notes} n where n.pokemon_id = ${pokemon}.id)`,
           activityKinds: sql<
             string[]
-          >`coalesce((select array_agg(${activity.kind}::text order by ${activity.kind}::text) from ${activity} where ${activity.pokemonId} = ${pokemon.id}), '{}')`,
+          >`coalesce((select array_agg(a.kind::text order by a.kind::text) from ${activity} a where a.pokemon_id = ${pokemon}.id), '{}')`,
+          trainerNames: sql<
+            string[]
+          >`coalesce((select array_agg(t.name order by t.name) from ${roster} r join ${trainers} t on t.id = r.trainer_id where r.pokemon_id = ${pokemon}.id), '{}')`,
         })
         .from(pokemon)
         .where(where)
@@ -135,7 +152,7 @@ pokemonRouter.get(
 pokemonRouter.get(
   '/filters',
   asyncHandler(async (_req, res) => {
-    const [types, generations] = await Promise.all([
+    const [types, generations, trainerOptions] = await Promise.all([
       db.execute<{ type: string }>(
         sql`select distinct t as type
             from ${pokemon}, unnest(array[${pokemon.type1}, ${pokemon.type2}]) as t
@@ -146,12 +163,17 @@ pokemonRouter.get(
         .selectDistinct({ generation: pokemon.generation })
         .from(pokemon)
         .orderBy(asc(pokemon.generation)),
+      db
+        .select({ id: trainers.id, name: trainers.name })
+        .from(trainers)
+        .orderBy(asc(trainers.name)),
     ]);
 
     res.json({
       types: types.rows.map((r) => r.type),
       generations: generations.map((r) => r.generation),
       activityKinds: activity.kind.enumValues,
+      trainers: trainerOptions,
     });
   }),
 );
@@ -167,13 +189,29 @@ pokemonRouter.get(
     const [record] = await db.select().from(pokemon).where(eq(pokemon.id, id)).limit(1);
     if (!record) throw notFound(`No Pokémon with id ${id}`);
 
-    const [noteRows, activityRows, neighbours] = await Promise.all([
+    const [noteRows, activityRows, neighbours, trainerRows] = await Promise.all([
       db.select().from(notes).where(eq(notes.pokemonId, id)).orderBy(desc(notes.createdAt)),
       db.select().from(activity).where(eq(activity.pokemonId, id)).orderBy(asc(activity.kind)),
       db
         .select({ id: pokemon.id, displayName: pokemon.displayName, spriteUrl: pokemon.spriteUrl })
         .from(pokemon)
         .where(inArray(pokemon.id, [id - 1, id + 1])),
+      // Which trainers carry this Pokémon — makes the roster relation
+      // navigable from the Pokémon side too.
+      db
+        .select({
+          rosterId: roster.id,
+          trainerId: trainers.id,
+          trainerName: trainers.name,
+          region: trainers.region,
+          nickname: roster.nickname,
+          level: roster.level,
+          status: roster.status,
+        })
+        .from(roster)
+        .innerJoin(trainers, eq(roster.trainerId, trainers.id))
+        .where(eq(roster.pokemonId, id))
+        .orderBy(asc(trainers.name)),
     ]);
 
     // How this Pokémon's base stat total ranks against the whole dataset.
@@ -188,6 +226,7 @@ pokemonRouter.get(
       pokemon: record,
       notes: noteRows,
       activity: activityRows,
+      trainers: trainerRows,
       neighbours: {
         previous: neighbours.find((n) => n.id === id - 1) ?? null,
         next: neighbours.find((n) => n.id === id + 1) ?? null,

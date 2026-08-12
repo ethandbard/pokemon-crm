@@ -45,6 +45,18 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    to: '/trainers',
+    label: 'Trainers',
+    icon: icon(
+      <>
+        <circle cx="9" cy="8" r="3" />
+        <path d="M3 19a6 6 0 0 1 12 0" />
+        <path d="M16 5.5a3 3 0 0 1 0 5.8" />
+        <path d="M17.5 19a6 6 0 0 0-1.6-4.1" />
+      </>,
+    ),
+  },
+  {
     to: '/dashboard',
     label: 'Performance Dashboard',
     icon: icon(

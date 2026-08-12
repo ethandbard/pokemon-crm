@@ -1,4 +1,4 @@
-import type { ActivityKind } from './types';
+import type { ActivityKind, RosterStatus } from './types';
 
 /**
  * Conventional Pokémon type colors. These are used for *badges only* — they're
@@ -46,6 +46,32 @@ export const ACTIVITY_META: Record<ActivityKind, { label: string; icon: string; 
   wishlist: { label: 'Wishlist', icon: '◆', hint: 'Wanted, not yet caught' },
   flagged: { label: 'Flagged', icon: '▲', hint: 'Needs follow-up' },
   reviewed: { label: 'Reviewed', icon: '✓', hint: 'Timestamp updates each review' },
+};
+
+export const ROSTER_STATUS_META: Record<
+  RosterStatus,
+  { label: string; hint: string; className: string }
+> = {
+  starter: {
+    label: 'Starter',
+    hint: 'Lead Pokémon',
+    className: 'border-brand bg-brand/10 text-brand-strong',
+  },
+  active: {
+    label: 'Active',
+    hint: 'On the working roster',
+    className: 'border-hairline bg-plane text-ink-2',
+  },
+  reserve: {
+    label: 'Reserve',
+    hint: 'Available but benched',
+    className: 'border-hairline bg-surface text-muted',
+  },
+  retired: {
+    label: 'Retired',
+    hint: 'Kept for history only',
+    className: 'border-hairline bg-surface text-muted line-through',
+  },
 };
 
 export function titleCase(value: string): string {

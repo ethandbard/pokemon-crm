@@ -71,6 +71,7 @@ pokemon-crm/
         │   └── format.ts     # type colors, unit + date formatting
         └── pages/
             ├── Home.tsx      # landing page: counters + links to every page
+            ├── Trainers.tsx  # trainer selector + roster dashboard
             ├── Lookup.tsx    # searchable/filterable/sortable table
             ├── Profile.tsx   # detail + notes + activity log + quick search
             ├── Dashboard.tsx # EDA charts
@@ -84,7 +85,8 @@ pokemon-crm/
 | Path | Page |
 |---|---|
 | `/` | Home (landing) — the sidebar logo links here |
-| `/lookup` | Pokémon Lookup — reads `?search=` to pre-fill the filter |
+| `/lookup` | Pokémon Lookup — reads `?search=` and `?trainerId=` to pre-fill filters |
+| `/trainers` | Trainers — `?trainerId=` selects a trainer and opens their dashboard |
 | `/pokemon/:id` | Pokémon Profile |
 | `/dashboard` | Performance Dashboard |
 | `/notes` | Notes |
@@ -121,6 +123,29 @@ once real users arrive. Everything is currently written under `DEFAULT_OWNER`
 (`server/src/constants.ts`). Adding auth means replacing that constant with the
 session user in the route handlers — no migration.
 
+### `trainers` and `roster`
+
+The advising analogy: a **trainer is the advisor**, their **roster is the
+caseload**, and each **Pokémon is a student**.
+
+`trainers` holds identity (name, region, specialty, email, bio). `roster` is the
+join table — one row per `(trainer_id, pokemon_id)`, enforced by a unique index,
+carrying `nickname`, `level`, and a `roster_status` enum
+(`starter` / `active` / `reserve` / `retired`). `retired` keeps a Pokémon in the
+history without counting toward the working roster, mirroring an inactive
+advisee.
+
+A Pokémon can appear on **many** trainers' rosters (Charizard is on both Ash's
+and Lance's), so the relation is genuinely many-to-many — don't assume a Pokémon
+has one trainer.
+
+Notes and activity are **not** attached to trainers. A trainer's "history" is
+derived: the notes and status flags on the Pokémon currently in their roster,
+joined through `roster`. That keeps a single source of truth per Pokémon and
+means adding a Pokémon to a roster brings its history along. If you ever need
+notes written *about a trainer* rather than about their Pokémon, that's a new
+column or table — don't overload the existing ones.
+
 ### `activity`
 Advising-style status flags: `caught`, `favorite`, `wishlist`, `flagged`,
 `reviewed` (a Postgres enum, `activity_kind`).
@@ -142,9 +167,11 @@ All routes are under `/api`. Responses are JSON; errors are
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/health` | Liveness + DB round trip |
-| GET | `/api/pokemon` | List — `search`, `type`, `generation`, `legendary`, `activity`, `minBaseStatTotal`, `maxBaseStatTotal`, `sort`, `direction`, `page`, `pageSize` |
-| GET | `/api/pokemon/filters` | Distinct types/generations/flags for dropdowns |
-| GET | `/api/pokemon/:id` | Profile + its notes, activity, dex neighbours, BST percentile |
+| GET | `/api/pokemon` | List — `search`, `type`, `generation`, `legendary`, `activity`, `trainerId`, `minBaseStatTotal`, `maxBaseStatTotal`, `sort`, `direction`, `page`, `pageSize` |
+| GET | `/api/pokemon/filters` | Distinct types/generations/flags/trainers for dropdowns |
+| GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, dex neighbours, BST percentile |
+| GET | `/api/trainers` | All trainers with roster size and mean BST — `search` (name, region, specialty). Unpaginated: it backs a select control |
+| GET | `/api/trainers/:id` | Trainer dashboard — roster, summary stats, type breakdown, stat averages, and the note/activity history for the roster |
 | GET | `/api/notes` | Cross-Pokémon feed — `search`, `pokemonId`, `owner`, `sort`, `direction`, pagination |
 | POST | `/api/notes` | Create |
 | PATCH | `/api/notes/:id` | Update body |
@@ -159,6 +186,32 @@ All routes are under `/api`. Responses are JSON; errors are
 - **Parameterised queries only.** Never build SQL by string concatenation or
   template interpolation of user input. Use the Drizzle query builder, or
   Drizzle's `` sql`` `` tag — its `${}` holes become bound parameters, not text.
+- **Correlated subqueries: alias the inner tables and qualify the outer
+  reference as `` ${table}.column ``.** This has already caused one silent bug.
+
+  Drizzle renders a column reference like `` ${pokemon.id} `` as a **bare
+  `"id"`**, not `"pokemon"."id"`. Inside a subquery, Postgres resolves a bare
+  name against the *innermost* scope first, so this:
+
+  ```ts
+  // WRONG — "pokemon_id" and "id" both resolve to `notes`,
+  // so this counts notes where notes.pokemon_id = notes.id (always ~0).
+  sql`(select count(*)::int from ${notes} where ${notes.pokemonId} = ${pokemon.id})`
+  ```
+
+  silently returned 0 for every row rather than erroring. Write it as:
+
+  ```ts
+  // RIGHT — inner table aliased, outer reference qualified.
+  sql`(select count(*)::int from ${notes} n where n.pokemon_id = ${pokemon}.id)`
+  ```
+
+  `` ${notes} `` renders the table name, so `` ${notes} n `` aliases it and
+  `` ${pokemon}.id `` renders `"pokemon".id`. When the subquery joins two tables
+  the bare form escalates from wrong to a hard `column reference "id" is
+  ambiguous` error — which is how this was finally caught. If you add a
+  correlated subquery, verify its count against `psql` rather than trusting that
+  it ran.
 - **Column names are never taken from user input.** `sort` is validated against a
   `SORTABLE` allow-list in each route that maps a public key to a real column.
 - **Validate at the edge.** Every `req.query` / `req.body` goes through a Zod
@@ -280,6 +333,7 @@ npm install
 cp .env.example .env      # then edit
 npm run db:migrate        # create tables
 npm run seed              # import from PokeAPI (~2 min for all 1,025)
+npm run seed:trainers     # create trainers + rosters (needs `seed` first)
 npm run dev               # API on :4000, web on :5173
 ```
 
@@ -297,8 +351,11 @@ Other scripts: `npm run db:generate` (new migration from schema changes),
   drizzle-kit) needs its postinstall to fetch a platform binary. The approvals
   live in the root `package.json` under `allowScripts`; after adding a dependency
   that pulls a new esbuild version, run `npm approve-scripts esbuild`.
-- **The seed is safe to re-run** — it upserts on primary key, so notes and
-  activity are untouched. Re-run it after changing how a column is derived.
+- **Both seeds are safe to re-run** — `seed` upserts on primary key and
+  `seed:trainers` upserts on trainer name and `(trainer, pokemon)`, so notes,
+  activity, and rosters survive. `seed:trainers` **skips** roster entries whose
+  Pokémon isn't seeded (rather than failing), so a `SEED_LIMIT=151` run will
+  legitimately drop the Sinnoh rosters and say so.
 - The current local Postgres uses `trust` auth on localhost, so `.env` has no
   password. Azure will need `PGSSL=true` and `sslmode=require`.
 

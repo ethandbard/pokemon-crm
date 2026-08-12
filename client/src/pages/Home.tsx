@@ -61,6 +61,24 @@ const DESTINATIONS: Destination[] = [
     ),
   },
   {
+    to: '/trainers',
+    title: 'Trainers',
+    description: 'Trainers and the rosters of Pokémon they carry.',
+    bullets: [
+      'Search or select a trainer to open their dashboard',
+      'Roster table with levels, status, and links to each profile',
+      'Type coverage, mean stats, and note/activity history per roster',
+    ],
+    icon: iconWrap(
+      <>
+        <circle cx="9" cy="8" r="3" />
+        <path d="M3 19a6 6 0 0 1 12 0" />
+        <path d="M16 5.5a3 3 0 0 1 0 5.8" />
+        <path d="M17.5 19a6 6 0 0 0-1.6-4.1" />
+      </>,
+    ),
+  },
+  {
     to: '/dashboard',
     title: 'Performance Dashboard',
     description: 'Exploratory analysis across the whole dataset.',
