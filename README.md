@@ -149,4 +149,48 @@ seeded rather than left empty.
 ## Documentation
 
 [CLAUDE.md](CLAUDE.md) covers the architecture, folder structure, data model,
-API surface, and coding conventions.
+API surface, and coding conventions. [TODO.md](TODO.md) is the backlog.
+
+## Credits and attribution
+
+### PokéAPI
+
+All Pokémon data — species, stats, types, sprites, evolution chains, and
+growth-rate curves — comes from **[PokéAPI](https://pokeapi.co)**, used under
+their [fair use policy](https://pokeapi.co/docs/v2). PokéAPI is a free,
+community-run service; please be considerate of it:
+
+- **The seed is a one-time import, not a runtime dependency.** Once seeded, the
+  app reads only from your own Postgres database and never calls PokéAPI again.
+- **Requests are capped and backed off.** `SEED_CONCURRENCY` defaults to 8, and
+  failures retry with exponential backoff. Raise it only if you have a reason to.
+- **Chains and curves are de-duplicated.** The 541 evolution chains and 6 growth
+  curves are each fetched once, not once per Pokémon.
+
+If you fork this, keep the caching behaviour. Re-fetching the Pokédex on every
+request is exactly what their policy asks you not to do.
+
+Sprites and official artwork are served from PokéAPI's sprite repository at
+display time rather than copied into this repo.
+
+### Pokémon
+
+Pokémon and Pokémon character names are trademarks of Nintendo, Creatures Inc.,
+and GAME FREAK Inc. This is an **unofficial, non-commercial fan project** built
+for learning, and is not affiliated with, endorsed by, or sponsored by any of
+them. No game assets are redistributed here.
+
+The trainers, rosters, levels, nicknames, and roster tenure are invented demo
+fixtures — not Pokémon canon.
+
+### Embedded dashboard
+
+The Tableau page embeds a workbook published to
+[Tableau Public](https://public.tableau.com); it is served by Tableau and is not
+backed by this app's database.
+
+## License
+
+[MIT](LICENSE) — see the file for the full text. The licence covers the code in
+this repository. It does not, and cannot, grant any rights over Pokémon data or
+intellectual property; see the attribution above.

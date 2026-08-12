@@ -1,5 +1,5 @@
 /**
- * One-time seed: pulls the National Pokédex from PokeAPI into the `pokemon`
+ * One-time seed: pulls the National Pokédex from PokéAPI into the `pokemon`
  * table.
  *
  *   npm run seed
@@ -8,6 +8,20 @@
  * (which reference pokemon.id) survive a re-seed untouched.
  *
  * Tunable via .env: SEED_LIMIT (how far up the dex to go) and SEED_CONCURRENCY.
+ *
+ * ---------------------------------------------------------------------------
+ * Data source: PokéAPI (https://pokeapi.co), used under their fair use policy.
+ *
+ * PokéAPI is free and community-run, and asks that clients cache locally rather
+ * than call it repeatedly. This script is the only thing in the app that talks
+ * to them: it runs once, writes to Postgres, and the app reads from Postgres
+ * thereafter. Three things keep it polite, and none should be removed casually:
+ *
+ *   - concurrency is capped (SEED_CONCURRENCY, default 8)
+ *   - failures retry with exponential backoff rather than hammering
+ *   - evolution chains and growth curves are de-duplicated, so each is fetched
+ *     once rather than once per Pokémon that shares it
+ * ---------------------------------------------------------------------------
  */
 import { sql } from 'drizzle-orm';
 import { db, pool } from '../db/client.js';
