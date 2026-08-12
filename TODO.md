@@ -160,6 +160,13 @@ extra HTTP, so re-seed time is unchanged. Worth doing as a single batch.
   conventions) silently returned zeros for weeks and was only caught when a
   later query made it ambiguous enough to crash. API-level tests over the
   aggregation endpoints would have caught it.
+
+  CI now runs typecheck, build, and a migrations smoke test
+  (`.github/workflows/ci.yml`), so the job exists to hang tests off — but it
+  runs no tests, because there are none. The highest-value first suite is the
+  aggregation endpoints (`/api/stats/dashboard`, `/api/trainers/:id`,
+  `/api/attention`) asserted against a known seeded fixture, since those are
+  where a wrong number looks plausible rather than throwing.
 - **Trainer note/activity history is capped at 50** with no pagination and no
   "showing 50 of N" — it silently truncates on a busy roster.
 - **`owner` is hardcoded** to `DEFAULT_OWNER`. An "acting as" switcher would

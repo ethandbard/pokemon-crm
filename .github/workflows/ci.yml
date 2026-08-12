@@ -1,0 +1,112 @@
+name: CI
+
+# Runs on every push to master and on every pull request targeting it.
+# Pull requests get a pass/fail before merge; pushes catch anything that
+# landed directly.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# A new push to the same branch cancels the previous run rather than queueing
+# behind it — the older result is stale the moment it's superseded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Typecheck and build (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      # Don't cancel Node 22 just because Node 20 failed — knowing whether a
+      # break is version-specific is the point of testing both.
+      fail-fast: false
+      matrix:
+        # 20 is the floor declared in package.json engines; 22 is current LTS.
+        node: ['20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          # Caches ~/.npm keyed on package-lock.json, so most runs skip the
+          # download. Requires the lockfile to be committed — it is.
+          cache: npm
+
+      # `ci` not `install`: installs exactly the lockfile, and fails if
+      # package.json and the lockfile disagree.
+      - run: npm ci
+
+      - name: Typecheck both workspaces
+        run: npm run typecheck
+
+      - name: Build both workspaces
+        run: npm run build
+
+  migrations:
+    name: Migrations apply to an empty database
+    runs-on: ubuntu-latest
+
+    # Guards the first-run setup path. `db:migrate` connects straight to the
+    # app database, so a fresh machine needs `db:create` first — that ordering
+    # broke once and this is what would catch it breaking again.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        # Without this the job can start before Postgres accepts connections.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/pokemon_crm
+      PGSSL: 'false'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Create the database
+        run: npm run db:create
+
+      - name: Create it again (must be idempotent)
+        run: npm run db:create
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      - name: Apply them again (must be idempotent)
+        run: npm run db:migrate
+
+      - name: Verify the expected tables exist
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d pokemon_crm \
+            -v ON_ERROR_STOP=1 -c "
+              select 'missing table: ' || t
+              from unnest(array['pokemon','notes','activity','trainers','roster','growth_rates']) t
+              where to_regclass('public.' || t) is null;
+            " -t | grep -q 'missing table' && exit 1 || echo 'all six tables present'
+
+# Deliberately NOT run here: `npm run seed`.
+#
+# Seeding is ~2,600 requests to PokéAPI. Firing that on every push is exactly
+# what their fair use policy asks clients not to do, and it would make CI slow
+# and flaky on someone else's uptime. The migration job above proves the schema
+# applies; the seed is verified by running it locally.

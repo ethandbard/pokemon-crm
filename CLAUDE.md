@@ -461,6 +461,26 @@ Other scripts: `npm run db:generate` (new migration from schema changes),
 
 ---
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push to `master` and every PR into it.
+
+- **build** — `npm ci`, `typecheck`, `build`, on Node 20 and 22. Node 20 is the
+  floor in `engines`; 22 is current LTS. `fail-fast` is off so a version-specific
+  break is distinguishable from a general one.
+- **migrations** — spins up a Postgres 16 service, then runs `db:create` and
+  `db:migrate` **twice each** and asserts all six tables exist. This guards the
+  first-run path specifically: `db:migrate` alone fails on an empty server, which
+  broke once.
+
+**CI does not seed.** That would be ~2,600 PokéAPI requests per push, which is
+what their fair use policy asks clients not to do, and it would make the build
+depend on someone else's uptime. The schema is covered by the migrations job;
+the seed is verified locally.
+
+CI needs no `.env` — nothing in `typecheck` or `build` executes `env.ts`, and the
+migrations job passes `DATABASE_URL` directly.
+
 ## Deploying against Azure Postgres
 
 Set `DATABASE_URL` to the Azure connection string (with `?sslmode=require`) and

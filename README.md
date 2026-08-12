@@ -1,5 +1,8 @@
 # Pokémon CRM
 
+[![CI](https://github.com/ethandbard/pokemon-crm/actions/workflows/ci.yml/badge.svg)](https://github.com/ethandbard/pokemon-crm/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A CRM-style tool for looking up Pokémon, tracking notes, and viewing performance
 stats — a personal learning sandbox modelled after the patterns used in student
 advising tools.
