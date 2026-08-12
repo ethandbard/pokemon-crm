@@ -27,6 +27,9 @@ pnpm-debug.log*
 .cache/
 coverage/
 
+# scratch Chrome profile created by the screenshot driver
+docs/screenshots/_profile/
+
 # editor / OS
 .vscode/*
 !.vscode/extensions.json
