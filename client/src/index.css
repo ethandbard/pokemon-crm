@@ -1,0 +1,52 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens. Chart colors come from the validated categorical palette
+ * (see CLAUDE.md § Charting); the `type-*` colors further down are the
+ * conventional Pokémon type hues and are used for badges only, never as
+ * chart series.
+ */
+@theme {
+  --color-surface: #fcfcfb;
+  --color-plane: #f9f9f7;
+  --color-ink: #0b0b0b;
+  --color-ink-2: #52514e;
+  --color-muted: #898781;
+  --color-hairline: #e1e0d9;
+  --color-baseline: #c3c2b7;
+
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+  --color-series-4: #eda100;
+
+  --color-status-good: #0ca30c;
+  --color-status-warning: #fab219;
+  --color-status-critical: #d03b3b;
+
+  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-plane);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Recharts draws its own SVG text; keep it on the muted ink token. */
+.recharts-cartesian-axis-tick-value,
+.recharts-polar-angle-axis-tick-value {
+  fill: var(--color-muted);
+  font-size: 12px;
+}
+
+.recharts-cartesian-grid line {
+  stroke: var(--color-hairline);
+}
