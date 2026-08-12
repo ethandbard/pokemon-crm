@@ -8,6 +8,8 @@ cross-record note feed, an analytics dashboard, and an embedded BI view.
 **Keep this file current.** When you add a route, table, page, or convention,
 update the matching section here in the same change.
 
+The agreed backlog lives in [TODO.md](TODO.md).
+
 ---
 
 ## Stack
@@ -63,6 +65,10 @@ pokemon-crm/
         │   ├── PageHeader.tsx
         │   ├── NoteEditor.tsx# NoteComposer + NoteActions (edit/delete)
         │   ├── PokemonQuickSearch.tsx # compact lookup table, used on Profile
+        │   ├── Modal.tsx     # native <dialog> wrapper + form field helpers
+        │   ├── TrainerForm.tsx        # create/edit a trainer
+        │   ├── RosterEditor.tsx       # add / edit / transfer roster entries
+        │   ├── EvolutionProgress.tsx  # stage bar + full chain view
         │   └── ui.tsx        # Card, Loading, EmptyState, ErrorState, …
         ├── lib/
         │   ├── api.ts        # fetch wrapper, ApiError, toQueryString
@@ -114,6 +120,16 @@ Notable columns:
   and bucketed constantly.
 - `height` is decimetres and `weight` is hectograms, exactly as PokeAPI reports
   them. Convert at the display edge (`formatHeight` / `formatWeight`).
+- **Evolution columns model "degree progress".** A chain is a programme of
+  study: `evolution_stage` is how far along a species sits, `chain_length` is
+  how many stages the programme has, and `evolution_min_level` is the level
+  needed to reach *this* stage from its predecessor. `evolves_from_id` walks
+  backwards; find the next stage by querying rows whose `evolves_from_id` is
+  this row's id. Branching chains (Eevee → 8 options) are why "next stage" is a
+  list, not a single value, and why `chain_length` is the depth of the deepest
+  branch. Non-level triggers (stones, trade, friendship) leave
+  `evolution_min_level` null and put the reason in `evolution_trigger` — code
+  that assumes a level exists will be wrong for roughly a third of the dex.
 
 ### `notes`
 `pokemon_id` FK (cascade delete), `owner`, `body`, `created_at`, `updated_at`.
@@ -138,6 +154,13 @@ advisee.
 A Pokémon can appear on **many** trainers' rosters (Charizard is on both Ash's
 and Lance's), so the relation is genuinely many-to-many — don't assume a Pokémon
 has one trainer.
+
+**Roster stats are computed over the ACTIVE roster.** On the trainer dashboard
+only `roster_size` counts everyone; mean BST, best BST, mean level, legendary
+count, type coverage, and the type chart all filter `status <> 'retired'`.
+Mixing the two is a bug that already shipped once — a "5 active" tile sat beside
+a mean that included a retired member. If you add a metric there, filter it the
+same way and label it "active roster".
 
 Notes and activity are **not** attached to trainers. A trainer's "history" is
 derived: the notes and status flags on the Pokémon currently in their roster,
@@ -171,7 +194,13 @@ All routes are under `/api`. Responses are JSON; errors are
 | GET | `/api/pokemon/filters` | Distinct types/generations/flags/trainers for dropdowns |
 | GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, dex neighbours, BST percentile |
 | GET | `/api/trainers` | All trainers with roster size and mean BST — `search` (name, region, specialty). Unpaginated: it backs a select control |
-| GET | `/api/trainers/:id` | Trainer dashboard — roster, summary stats, type breakdown, stat averages, and the note/activity history for the roster |
+| GET | `/api/trainers/:id` | Trainer dashboard — roster (with evolution progress), summary stats, type breakdown, stat averages, and the note/activity history for the roster |
+| POST | `/api/trainers` | Create a trainer |
+| PATCH | `/api/trainers/:id` | Update a trainer |
+| DELETE | `/api/trainers/:id` | Delete a trainer; cascades to their roster rows |
+| POST | `/api/trainers/:id/roster` | Add a Pokémon to that trainer's roster |
+| PATCH | `/api/roster/:id` | Update nickname/level/status, or move the entry to another trainer |
+| DELETE | `/api/roster/:id` | Remove a roster entry |
 | GET | `/api/notes` | Cross-Pokémon feed — `search`, `pokemonId`, `owner`, `sort`, `direction`, pagination |
 | POST | `/api/notes` | Create |
 | PATCH | `/api/notes/:id` | Update body |
@@ -347,6 +376,13 @@ Other scripts: `npm run db:generate` (new migration from schema changes),
   bundles its config as CJS, which can't load the ESM-only `env.ts`
   (`import.meta.url`). The config reads the same `.env` directly instead. If you
   add an env var both need, add it in both places.
+- **A native `<dialog>` needs `m-auto` under Tailwind.** Dialogs centre
+  themselves via `margin: auto`, and Tailwind's preflight resets margins to 0,
+  which pins the modal to the top-left corner. `components/Modal.tsx` sets it;
+  don't remove it.
+- **Closed modals stay mounted.** Pages render `<Modal open={false}>` rather
+  than unmounting, so `document.querySelector('dialog')` can return a *closed*
+  dialog. Target `dialog[open]` when scripting against one.
 - **npm ≥ 11 blocks install scripts by default.** esbuild (used by tsx, vite, and
   drizzle-kit) needs its postinstall to fetch a platform binary. The approvals
   live in the root `package.json` under `allowScripts`; after adding a dependency
@@ -376,11 +412,8 @@ proxy that forwards `/api` to the Express server, mirroring the Vite dev proxy.
 
 ## Not yet built
 
-- **No auth.** Every write is attributed to `DEFAULT_OWNER`. The `owner` columns
-  and their indexes are already in place for it.
-- **No dark mode.** The app commits to the light surface; the tokens are
-  centralised in `index.css`, so adding one is a scoped change.
-- **No automated tests.** Verification so far has been manual (endpoint smoke
-  tests plus driving each page in a browser).
-- The client bundle is a single ~600 kB chunk (Recharts dominates); route-level
-  `React.lazy` would be the first fix if that matters.
+See [TODO.md](TODO.md) for the scheduled backlog (needs-attention queue, then
+the interactivity layer) and the full list of known gaps. The short version:
+no auth (`owner` is one hardcoded constant), no tests, no dark mode
+(deprioritised), a single ~640 kB JS chunk, and trainer history capped at 50
+rows without pagination.

@@ -66,6 +66,23 @@ export const pokemon = pgTable(
     spriteUrl: text('sprite_url'),
     artworkUrl: text('artwork_url'),
 
+    /*
+     * Evolution chain — the "degree progress" model. A chain is a programme of
+     * study: `evolutionStage` is how far along this species sits (1-indexed),
+     * `chainLength` is how many stages the programme has, and
+     * `evolutionMinLevel` is the level requirement to reach THIS stage from its
+     * predecessor. `evolvesFromId` walks backwards; find the next stage by
+     * querying for rows whose `evolvesFromId` is this row's id.
+     */
+    evolutionChainId: integer('evolution_chain_id'),
+    evolvesFromId: integer('evolves_from_id'),
+    evolutionStage: integer('evolution_stage').notNull().default(1),
+    chainLength: integer('chain_length').notNull().default(1),
+    /** Null when the trigger isn't level-based (stone, trade, friendship…). */
+    evolutionMinLevel: integer('evolution_min_level'),
+    evolutionTrigger: text('evolution_trigger'),
+    isFullyEvolved: boolean('is_fully_evolved').notNull().default(true),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -74,6 +91,8 @@ export const pokemon = pgTable(
     index('pokemon_type1_idx').on(table.type1),
     index('pokemon_generation_idx').on(table.generation),
     index('pokemon_base_stat_total_idx').on(table.baseStatTotal),
+    index('pokemon_evolution_chain_idx').on(table.evolutionChainId),
+    index('pokemon_evolves_from_idx').on(table.evolvesFromId),
   ],
 );
 

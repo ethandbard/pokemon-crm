@@ -44,6 +44,81 @@ interface SpeciesResponse {
   is_legendary: boolean;
   is_mythical: boolean;
   color: NamedRef | null;
+  evolution_chain: { url: string } | null;
+}
+
+interface ChainLink {
+  species: NamedRef;
+  evolves_to: ChainLink[];
+  evolution_details: {
+    min_level: number | null;
+    trigger: NamedRef | null;
+    item: NamedRef | null;
+    min_happiness: number | null;
+  }[];
+}
+
+interface EvolutionChainResponse {
+  id: number;
+  chain: ChainLink;
+}
+
+/** Everything the seed derives about one species' place in its chain. */
+interface EvolutionFacts {
+  evolutionChainId: number;
+  evolvesFromId: number | null;
+  evolutionStage: number;
+  chainLength: number;
+  evolutionMinLevel: number | null;
+  evolutionTrigger: string | null;
+  isFullyEvolved: boolean;
+}
+
+/** `https://pokeapi.co/api/v2/pokemon-species/25/` → 25 */
+function idFromUrl(url: string): number | null {
+  const match = /\/(\d+)\/?$/.exec(url);
+  return match?.[1] ? Number.parseInt(match[1], 10) : null;
+}
+
+/**
+ * Walks an evolution chain into flat per-species facts.
+ *
+ * `chainLength` is the depth of the deepest branch, so a species in a branching
+ * chain (Eevee) reports the programme length it actually sits in. Branches are
+ * walked independently, which is why depth is computed first.
+ */
+function walkChain(chain: EvolutionChainResponse): Map<number, EvolutionFacts> {
+  const facts = new Map<number, EvolutionFacts>();
+
+  function depth(link: ChainLink): number {
+    if (link.evolves_to.length === 0) return 1;
+    return 1 + Math.max(...link.evolves_to.map(depth));
+  }
+
+  const chainLength = depth(chain.chain);
+
+  function visit(link: ChainLink, stage: number, parentId: number | null) {
+    const speciesId = idFromUrl(link.species.url);
+    if (speciesId === null) return;
+
+    // evolution_details describes how this species is reached FROM its parent.
+    const detail = link.evolution_details[0];
+
+    facts.set(speciesId, {
+      evolutionChainId: chain.id,
+      evolvesFromId: parentId,
+      evolutionStage: stage,
+      chainLength,
+      evolutionMinLevel: detail?.min_level ?? null,
+      evolutionTrigger: detail?.item?.name ?? detail?.trigger?.name ?? null,
+      isFullyEvolved: link.evolves_to.length === 0,
+    });
+
+    for (const child of link.evolves_to) visit(child, stage + 1, speciesId);
+  }
+
+  visit(chain.chain, 1, null);
+  return facts;
 }
 
 async function fetchJson<T>(url: string, attempt = 1): Promise<T> {
@@ -73,7 +148,13 @@ function statValue(stats: PokemonResponse['stats'], name: string): number {
   return stats.find((s) => s.stat.name === name)?.base_stat ?? 0;
 }
 
-async function buildRow(dex: number): Promise<NewPokemon | null> {
+/** A built row plus the evolution chain it belongs to, resolved in a later pass. */
+interface BuiltRow {
+  row: NewPokemon;
+  chainId: number | null;
+}
+
+async function buildRow(dex: number): Promise<BuiltRow | null> {
   const [detail, species] = await Promise.all([
     fetchJson<PokemonResponse>(`${POKEAPI}/pokemon/${dex}`),
     fetchJson<SpeciesResponse>(`${POKEAPI}/pokemon-species/${dex}`).catch(() => null),
@@ -93,7 +174,7 @@ async function buildRow(dex: number): Promise<NewPokemon | null> {
   const specialDefense = statValue(detail.stats, 'special-defense');
   const speed = statValue(detail.stats, 'speed');
 
-  return {
+  const row: NewPokemon = {
     id: detail.id,
     name: detail.name,
     displayName: titleCase(detail.name),
@@ -118,6 +199,11 @@ async function buildRow(dex: number): Promise<NewPokemon | null> {
     spriteUrl: detail.sprites.front_default,
     artworkUrl: detail.sprites.other?.['official-artwork']?.front_default ?? detail.sprites.front_default,
     updatedAt: new Date(),
+  };
+
+  return {
+    row,
+    chainId: species?.evolution_chain ? idFromUrl(species.evolution_chain.url) : null,
   };
 }
 
@@ -161,8 +247,39 @@ async function main() {
     }
   });
 
-  const valid = rows.filter((row): row is NewPokemon => row !== null);
-  console.log(`[seed] fetched ${valid.length} Pokémon; writing to Postgres…`);
+  const built = rows.filter((row): row is BuiltRow => row !== null);
+
+  // --- Second pass: evolution chains -------------------------------------
+  // Many species share a chain (all three Bulbasaur stages point at chain 1),
+  // so fetch each chain once rather than once per Pokémon.
+  const chainIds = [...new Set(built.map((b) => b.chainId).filter((id): id is number => id !== null))];
+  console.log(`[seed] fetching ${chainIds.length} evolution chains…`);
+
+  const evolutionFacts = new Map<number, EvolutionFacts>();
+  let chainFailures = 0;
+
+  await mapWithConcurrency(chainIds, env.seedConcurrency, async (chainId) => {
+    try {
+      const chain = await fetchJson<EvolutionChainResponse>(`${POKEAPI}/evolution-chain/${chainId}`);
+      for (const [speciesId, facts] of walkChain(chain)) evolutionFacts.set(speciesId, facts);
+    } catch (err) {
+      chainFailures += 1;
+      console.warn(`[seed] evolution chain ${chainId} failed: ${String(err)}`);
+    }
+    return null;
+  });
+
+  const valid = built.map((b) => {
+    const facts = evolutionFacts.get(b.row.id);
+    // Species with no chain data (or a failed fetch) stay at the schema
+    // defaults: a one-stage chain that is already fully evolved.
+    return facts ? { ...b.row, ...facts } : b.row;
+  });
+
+  const withEvolution = valid.filter((row) => row.evolutionChainId != null).length;
+  console.log(
+    `[seed] fetched ${valid.length} Pokémon (${withEvolution} with evolution data); writing to Postgres…`,
+  );
 
   // Chunked so a single INSERT never exceeds Postgres' 65535 bind-parameter cap.
   const CHUNK = 200;
@@ -196,6 +313,13 @@ async function main() {
           isMythical: sql`excluded.is_mythical`,
           spriteUrl: sql`excluded.sprite_url`,
           artworkUrl: sql`excluded.artwork_url`,
+          evolutionChainId: sql`excluded.evolution_chain_id`,
+          evolvesFromId: sql`excluded.evolves_from_id`,
+          evolutionStage: sql`excluded.evolution_stage`,
+          chainLength: sql`excluded.chain_length`,
+          evolutionMinLevel: sql`excluded.evolution_min_level`,
+          evolutionTrigger: sql`excluded.evolution_trigger`,
+          isFullyEvolved: sql`excluded.is_fully_evolved`,
           updatedAt: sql`now()`,
         },
       });

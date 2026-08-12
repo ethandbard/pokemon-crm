@@ -26,6 +26,7 @@ import {
 import { PageHeader } from '../components/PageHeader';
 import { NoteActions, NoteComposer } from '../components/NoteEditor';
 import { PokemonQuickSearch } from '../components/PokemonQuickSearch';
+import { EvolutionChain } from '../components/EvolutionProgress';
 import {
   ACTIVITY_META,
   ROSTER_STATUS_META,
@@ -74,7 +75,7 @@ export function ProfilePage() {
 
   if (!data) return null;
 
-  const { pokemon, notes, activity, neighbours, ranking, trainers } = data;
+  const { pokemon, notes, activity, neighbours, ranking, trainers, evolution } = data;
   const activeKinds = new Set(activity.map((a) => a.kind));
   const lastReviewed = activity.find((a) => a.kind === 'reviewed')?.updatedAt ?? null;
 
@@ -387,6 +388,17 @@ export function ProfilePage() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+          </Card>
+
+          <Card
+            title="Evolution line"
+            subtitle={
+              evolution.chainLength > 1
+                ? `Stage ${evolution.stage} of ${evolution.chainLength}${evolution.isFullyEvolved ? ' — fully evolved' : ''}`
+                : 'Single-stage species'
+            }
+          >
+            <EvolutionChain chain={evolution.chain} currentId={pokemon.id} />
           </Card>
 
           <Card title="Notes" subtitle={`${notes.length} on this Pokémon`}>

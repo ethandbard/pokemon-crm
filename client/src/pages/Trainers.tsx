@@ -9,10 +9,14 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { toQueryString } from '../lib/api';
+import { api, toQueryString } from '../lib/api';
 import { useApi, useDebounced } from '../lib/useApi';
-import type { TrainerDashboardResponse, TrainerListItem } from '../lib/types';
+import type { RosterMember, TrainerDashboardResponse, TrainerListItem } from '../lib/types';
+import { TrainerForm } from '../components/TrainerForm';
+import { AddRosterMember, EditRosterMember } from '../components/RosterEditor';
+import { EvolutionProgress } from '../components/EvolutionProgress';
 import {
+  Button,
   Card,
   EmptyState,
   ErrorState,
@@ -43,6 +47,7 @@ export function TrainersPage() {
     [debouncedSearch],
   );
   const list = useApi<{ data: TrainerListItem[] }>(listPath);
+  const [creating, setCreating] = useState(false);
 
   function selectTrainer(id: string) {
     if (id) setSearchParams({ trainerId: id });
@@ -54,6 +59,21 @@ export function TrainersPage() {
       <PageHeader
         title="Trainers"
         description="Each trainer carries a roster of Pokémon — the advising analogue of an advisor's caseload. Pick a trainer to open their dashboard."
+        actions={
+          <Button variant="primary" onClick={() => setCreating(true)}>
+            + New trainer
+          </Button>
+        }
+      />
+
+      <TrainerForm
+        open={creating}
+        onClose={() => setCreating(false)}
+        onSaved={(saved) => {
+          setCreating(false);
+          list.refetch();
+          selectTrainer(String(saved.id));
+        }}
       />
 
       {/* ---- Selector: search + dropdown, side by side ---- */}
@@ -111,12 +131,20 @@ export function TrainersPage() {
             description={
               debouncedSearch
                 ? 'Try a different name, region, or specialty.'
-                : 'Run `npm run seed:trainers` to create trainers and their rosters.'
+                : 'Create one above, or run `npm run seed:trainers` for a starting set.'
             }
           />
         </div>
       ) : selectedId ? (
-        <TrainerDashboard trainerId={selectedId} />
+        <TrainerDashboard
+          trainerId={selectedId}
+          allTrainers={list.data.data}
+          onTrainerChanged={list.refetch}
+          onTrainerDeleted={() => {
+            list.refetch();
+            selectTrainer('');
+          }}
+        />
       ) : (
         // No selection yet — show the roster cards as a browsable index.
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -184,10 +212,25 @@ const tooltipProps = {
   },
 } as const;
 
-function TrainerDashboard({ trainerId }: { trainerId: string }) {
+function TrainerDashboard({
+  trainerId,
+  allTrainers,
+  onTrainerChanged,
+  onTrainerDeleted,
+}: {
+  trainerId: string;
+  allTrainers: TrainerListItem[];
+  onTrainerChanged: () => void;
+  onTrainerDeleted: () => void;
+}) {
   const { data, loading, error, refetch } = useApi<TrainerDashboardResponse>(
     `/api/trainers/${trainerId}`,
   );
+  const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [editingMember, setEditingMember] = useState<RosterMember | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   if (loading && !data) return <Loading label="Loading roster…" />;
   if (error) return <ErrorState message={error} onRetry={refetch} />;
@@ -196,6 +239,42 @@ function TrainerDashboard({ trainerId }: { trainerId: string }) {
   const { trainer, roster, summary, typeBreakdown, statAverages, notes, activity } = data;
 
   const typeData = typeBreakdown.map((row) => ({ ...row, type: titleCase(row.type) }));
+  const eligible = roster.filter((m) => m.milestoneEligible);
+
+  async function deleteTrainer() {
+    if (
+      !window.confirm(
+        `Delete ${trainer.name}? Their ${roster.length} roster ${roster.length === 1 ? 'entry' : 'entries'} will be removed too. Notes and status flags on those Pokémon are kept.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.delete(`/api/trainers/${trainer.id}`);
+      onTrainerDeleted();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Could not delete the trainer');
+      setBusy(false);
+    }
+  }
+
+  async function removeMember(member: RosterMember) {
+    const label = member.nickname ?? member.displayName;
+    if (!window.confirm(`Remove ${label} from ${trainer.name}'s roster?`)) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.delete(`/api/roster/${member.id}`);
+      refetch();
+      onTrainerChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Could not remove the roster entry');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -211,30 +290,123 @@ function TrainerDashboard({ trainerId }: { trainerId: string }) {
             </p>
             {trainer.bio && <p className="mt-2 max-w-2xl text-sm text-ink-2">{trainer.bio}</p>}
           </div>
-          <Link
-            to={`/lookup${toQueryString({ trainerId: trainer.id })}`}
-            className="rounded-md border border-hairline bg-surface px-3 py-1.5 text-sm font-medium text-ink hover:bg-plane"
-          >
-            Open roster in Lookup →
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              to={`/lookup${toQueryString({ trainerId: trainer.id })}`}
+              className="rounded-md border border-hairline bg-surface px-3 py-1.5 text-sm font-medium text-ink hover:bg-plane"
+            >
+              Open roster in Lookup →
+            </Link>
+            <Button onClick={() => setEditing(true)} disabled={busy}>
+              Edit
+            </Button>
+            <Button variant="danger" onClick={deleteTrainer} disabled={busy}>
+              Delete
+            </Button>
+          </div>
         </div>
+        {actionError && (
+          <p className="mt-3 text-sm text-status-critical">
+            <span aria-hidden="true">▲ </span>
+            {actionError}
+          </p>
+        )}
       </Card>
 
-      {/* ---- Roster stats ---- */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-        <StatTile label="Roster size" value={summary?.roster_size ?? 0} />
-        <StatTile label="Active" value={summary?.active_count ?? 0} hint="excludes retired" />
-        <StatTile label="Mean BST" value={summary?.avg_base_stat_total ?? 0} />
-        <StatTile label="Best BST" value={summary?.max_base_stat_total ?? 0} />
-        <StatTile label="Mean level" value={summary?.avg_level ?? 0} />
-        <StatTile label="Types covered" value={summary?.distinct_types ?? 0} hint="of 18" />
+      {editing && (
+        <TrainerForm
+          open
+          trainer={trainer}
+          onClose={() => setEditing(false)}
+          onSaved={() => {
+            setEditing(false);
+            refetch();
+            onTrainerChanged();
+          }}
+        />
+      )}
+
+      <AddRosterMember
+        open={adding}
+        trainerId={trainer.id}
+        trainerName={trainer.name}
+        existingIds={roster.map((m) => m.pokemonId)}
+        onClose={() => setAdding(false)}
+        onSaved={() => {
+          setAdding(false);
+          refetch();
+          onTrainerChanged();
+        }}
+      />
+
+      <EditRosterMember
+        member={editingMember}
+        trainers={allTrainers}
+        currentTrainerId={trainer.id}
+        onClose={() => setEditingMember(null)}
+        onSaved={() => {
+          setEditingMember(null);
+          refetch();
+          onTrainerChanged();
+        }}
+      />
+
+      {/*
+        Roster size counts everyone; every other tile is computed over the
+        ACTIVE roster, which is why they carry the "active roster" hint.
+      */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+        <StatTile label="Roster size" value={summary?.roster_size ?? 0} hint="incl. retired" />
+        <StatTile label="Active" value={summary?.active_count ?? 0} hint="excl. retired" />
+        <StatTile label="Mean BST" value={summary?.avg_base_stat_total ?? 0} hint="active roster" />
+        <StatTile label="Best BST" value={summary?.max_base_stat_total ?? 0} hint="active roster" />
+        <StatTile label="Mean level" value={summary?.avg_level ?? 0} hint="active roster" />
+        <StatTile label="Types covered" value={summary?.distinct_types ?? 0} hint="of 18, active" />
+        <StatTile
+          label="Ready to evolve"
+          value={summary?.milestone_eligible ?? 0}
+          hint="milestone met"
+        />
       </div>
+
+      {/* ---- The advising hook: who has met a milestone and needs signing off ---- */}
+      {eligible.length > 0 && (
+        <Card
+          title="Ready to evolve"
+          subtitle="These roster members have met the level requirement for their next stage"
+        >
+          <ul className="flex flex-wrap gap-2">
+            {eligible.map((member) => (
+              <li key={member.id}>
+                <Link
+                  to={`/pokemon/${member.pokemonId}`}
+                  className="flex items-center gap-2 rounded-lg border border-brand bg-brand/10 px-3 py-1.5 text-xs font-medium text-brand-strong hover:bg-brand/15"
+                >
+                  {member.spriteUrl && (
+                    <img src={member.spriteUrl} alt="" width={24} height={24} className="h-6 w-6" />
+                  )}
+                  {member.nickname ?? member.displayName}
+                  <span className="font-normal text-ink-2">
+                    Lv {member.level} → {member.nextEvolution?.display_name} (needs{' '}
+                    {member.nextEvolution?.evolution_min_level})
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {roster.length === 0 ? (
         <div className="rounded-xl border border-hairline bg-surface">
           <EmptyState
             title="This trainer has an empty roster"
             description="No Pokémon are assigned yet, so there are no stats to show."
+            action={
+              <Button variant="primary" onClick={() => setAdding(true)}>
+                + Add the first Pokémon
+              </Button>
+            }
           />
         </div>
       ) : (
@@ -243,6 +415,11 @@ function TrainerDashboard({ trainerId }: { trainerId: string }) {
           <Card
             title="Roster"
             subtitle={`${roster.length} Pokémon — select any row to open its profile`}
+            actions={
+              <Button variant="primary" onClick={() => setAdding(true)} disabled={busy}>
+                + Add Pokémon
+              </Button>
+            }
           >
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -267,7 +444,13 @@ function TrainerDashboard({ trainerId }: { trainerId: string }) {
                       BST
                     </th>
                     <th scope="col" className="px-2 py-2 text-left font-medium">
+                      Progress
+                    </th>
+                    <th scope="col" className="px-2 py-2 text-left font-medium">
                       CRM
+                    </th>
+                    <th scope="col" className="px-2 py-2 text-right font-medium">
+                      <span className="sr-only">Actions</span>
                     </th>
                   </tr>
                 </thead>
@@ -328,6 +511,13 @@ function TrainerDashboard({ trainerId }: { trainerId: string }) {
                           {member.baseStatTotal}
                         </td>
                         <td className="px-2 py-2">
+                          <EvolutionProgress
+                            stage={member.evolutionStage}
+                            chainLength={member.chainLength}
+                            eligible={member.milestoneEligible}
+                          />
+                        </td>
+                        <td className="px-2 py-2">
                           <div className="flex items-center gap-1.5 text-xs text-muted">
                             {member.noteCount > 0 && <span>✎ {member.noteCount}</span>}
                             {member.activityKinds.map((kind) => (
@@ -336,6 +526,24 @@ function TrainerDashboard({ trainerId }: { trainerId: string }) {
                               </span>
                             ))}
                           </div>
+                        </td>
+                        <td className="px-2 py-2 text-right whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => setEditingMember(member)}
+                            disabled={busy}
+                            className="text-xs text-muted hover:text-brand disabled:opacity-50"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeMember(member)}
+                            disabled={busy}
+                            className="ml-3 text-xs text-muted hover:text-status-critical disabled:opacity-50"
+                          >
+                            Remove
+                          </button>
                         </td>
                       </tr>
                     );

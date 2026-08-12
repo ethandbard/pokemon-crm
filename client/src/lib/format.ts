@@ -31,6 +31,9 @@ export function typeColor(type: string): string {
   return TYPE_COLORS[type] ?? '#898781';
 }
 
+/** The 18 canonical types, for form selects that can't wait on a fetch. */
+export const POKEMON_TYPE_NAMES = Object.keys(TYPE_COLORS);
+
 export const STAT_LABELS = {
   hp: 'HP',
   attack: 'Attack',

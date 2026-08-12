@@ -189,7 +189,7 @@ pokemonRouter.get(
     const [record] = await db.select().from(pokemon).where(eq(pokemon.id, id)).limit(1);
     if (!record) throw notFound(`No Pokémon with id ${id}`);
 
-    const [noteRows, activityRows, neighbours, trainerRows] = await Promise.all([
+    const [noteRows, activityRows, neighbours, trainerRows, chainRows] = await Promise.all([
       db.select().from(notes).where(eq(notes.pokemonId, id)).orderBy(desc(notes.createdAt)),
       db.select().from(activity).where(eq(activity.pokemonId, id)).orderBy(asc(activity.kind)),
       db
@@ -212,6 +212,24 @@ pokemonRouter.get(
         .innerJoin(trainers, eq(roster.trainerId, trainers.id))
         .where(eq(roster.pokemonId, id))
         .orderBy(asc(trainers.name)),
+      // The whole evolution chain this Pokémon belongs to, in stage order —
+      // the "programme of study" it sits within.
+      record.evolutionChainId === null
+        ? Promise.resolve([])
+        : db
+            .select({
+              id: pokemon.id,
+              displayName: pokemon.displayName,
+              spriteUrl: pokemon.spriteUrl,
+              evolutionStage: pokemon.evolutionStage,
+              evolvesFromId: pokemon.evolvesFromId,
+              evolutionMinLevel: pokemon.evolutionMinLevel,
+              evolutionTrigger: pokemon.evolutionTrigger,
+              isFullyEvolved: pokemon.isFullyEvolved,
+            })
+            .from(pokemon)
+            .where(eq(pokemon.evolutionChainId, record.evolutionChainId))
+            .orderBy(asc(pokemon.evolutionStage), asc(pokemon.id)),
     ]);
 
     // How this Pokémon's base stat total ranks against the whole dataset.
@@ -227,6 +245,14 @@ pokemonRouter.get(
       notes: noteRows,
       activity: activityRows,
       trainers: trainerRows,
+      evolution: {
+        chain: chainRows,
+        stage: record.evolutionStage,
+        chainLength: record.chainLength,
+        isFullyEvolved: record.isFullyEvolved,
+        /** Stages reachable directly from here (plural for Eevee-style chains). */
+        nextStages: chainRows.filter((link) => link.evolvesFromId === record.id),
+      },
       neighbours: {
         previous: neighbours.find((n) => n.id === id - 1) ?? null,
         next: neighbours.find((n) => n.id === id + 1) ?? null,

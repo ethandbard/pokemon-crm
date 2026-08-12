@@ -92,6 +92,32 @@ export interface RosterMember {
   spriteUrl: string | null;
   noteCount: number;
   activityKinds: ActivityKind[];
+
+  // Evolution progress — the "degree progress" model.
+  evolutionStage: number;
+  chainLength: number;
+  isFullyEvolved: boolean;
+  /** snake_case: this comes straight from a jsonb subquery, not the query builder. */
+  nextEvolution: {
+    id: number;
+    display_name: string;
+    evolution_min_level: number | null;
+    evolution_trigger: string | null;
+    sprite_url: string | null;
+  } | null;
+  /** Level requirement for the next stage is met but it hasn't evolved yet. */
+  milestoneEligible: boolean;
+}
+
+export interface EvolutionLink {
+  id: number;
+  displayName: string;
+  spriteUrl: string | null;
+  evolutionStage: number;
+  evolvesFromId: number | null;
+  evolutionMinLevel: number | null;
+  evolutionTrigger: string | null;
+  isFullyEvolved: boolean;
 }
 
 export interface TrainerDashboardResponse {
@@ -105,6 +131,7 @@ export interface TrainerDashboardResponse {
     avg_level: number;
     legendary_count: number;
     distinct_types: number;
+    milestone_eligible: number;
   } | null;
   typeBreakdown: { type: string; count: number }[];
   statAverages: { stat: string; avg: number }[];
@@ -190,6 +217,13 @@ export interface PokemonProfileResponse {
     next: { id: number; displayName: string; spriteUrl: string | null } | null;
   };
   ranking: { baseStatTotalPercentile: number | null; total: number };
+  evolution: {
+    chain: EvolutionLink[];
+    stage: number;
+    chainLength: number;
+    isFullyEvolved: boolean;
+    nextStages: EvolutionLink[];
+  };
 }
 
 export interface NotesResponse {
