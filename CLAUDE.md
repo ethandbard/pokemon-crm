@@ -69,6 +69,12 @@ pokemon-crm/
         │   ├── TrainerForm.tsx        # create/edit a trainer
         │   ├── RosterEditor.tsx       # add / edit / transfer roster entries
         │   ├── EvolutionProgress.tsx  # stage bar + full chain view
+        │   ├── AttentionQueue.tsx     # ranked early-alert list with reasons
+        │   ├── CommandPalette.tsx     # ⌘K global jump-to
+        │   ├── Toast.tsx     # ToastProvider, useToast, confirmable(), useHotkey
+        │   ├── BulkActionBar.tsx      # multi-select actions on Lookup
+        │   ├── RosterBoard.tsx        # drag-and-drop roster status kanban
+        │   ├── SavedViews.tsx         # named filter presets
         │   └── ui.tsx        # Card, Loading, EmptyState, ErrorState, …
         ├── lib/
         │   ├── api.ts        # fetch wrapper, ApiError, toQueryString
@@ -194,6 +200,10 @@ All routes are under `/api`. Responses are JSON; errors are
 | GET | `/api/pokemon/filters` | Distinct types/generations/flags/trainers for dropdowns |
 | GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, dex neighbours, BST percentile |
 | GET | `/api/trainers` | All trainers with roster size and mean BST — `search` (name, region, specialty). Unpaginated: it backs a select control |
+| GET | `/api/attention` | Needs-attention queue — `trainerId` (omit for workspace-wide), `limit`. Returns each item's `score` **and** its `reasons`, plus the `model` constants |
+| POST | `/api/activity/bulk` | Set or clear one flag across many Pokémon (explicit target state, not a toggle) |
+| POST | `/api/notes/bulk` | Write the same note against many Pokémon |
+| POST | `/api/trainers/:id/roster/bulk` | Add many Pokémon to a roster; already-present ones are skipped, not an error |
 | GET | `/api/trainers/:id` | Trainer dashboard — roster (with evolution progress), summary stats, type breakdown, stat averages, and the note/activity history for the roster |
 | POST | `/api/trainers` | Create a trainer |
 | PATCH | `/api/trainers/:id` | Update a trainer |
@@ -260,6 +270,17 @@ All routes are under `/api`. Responses are JSON; errors are
   `{ data, loading, error, refetch }` and discards stale responses (fast typing
   can't leave an earlier result on screen). Mutations call `api.post/patch/delete`
   then `refetch()`.
+- **Pass `null` to `useApi` to skip fetching.** Search-on-demand surfaces (the
+  command palette, the bulk roster picker) must use this rather than pointing at
+  a placeholder endpoint — otherwise `data` briefly holds the wrong shape and
+  the component reads fields that aren't there. This caused a white-screen crash
+  once.
+- **Destructive actions use `confirmable()` from `useToast()`**, not
+  `window.confirm`: perform the action, then offer Undo in the toast.
+  Recoverable-after beats blocking-before.
+- **Charts set `isAnimationActive={false}`.** Entry animation delays reading the
+  data and makes headless screenshots nondeterministic (bars capture at zero
+  height).
 - **Search inputs are debounced** with `useDebounced` (300ms).
 - **Build request URLs with `toQueryString`**, which drops empty values so the URL
   doesn't collect `?type=&generation=`.
@@ -312,6 +333,34 @@ Charts follow a fixed set of rules — match them when adding one:
 - The Profile's base-stat chart is the one chart on `--color-brand`: it's a
   single-series bar chart of one Pokémon's stats, not a comparison across the
   dataset, so it reads as page chrome rather than a data encoding.
+
+### Needs-attention scoring
+
+`server/src/attention.ts`. The split is deliberate: **SQL gathers facts,
+TypeScript applies weights.** Every weight lives in `ATTENTION`
+(`constants.ts`), so tuning the model never means editing a query, and the same
+numbers produce both the score and the human-readable reasons. Scoring in SQL
+would have scattered the weights through a `case` and made the reasons a second,
+drifting copy of the same logic.
+
+Five signals: never reviewed, stale review, flagged, milestone overdue, behind
+pace. Retired roster members are never scored — they're history, not workload.
+
+**`expPerDay` is a simulation constant, not a measurement.** PokeAPI gives
+EXP-per-level, never EXP-per-day, so turning "time on roster" into an expected
+level needs an assumed training rate. It's surfaced in the API response and
+printed under the queue in the UI so the number never reads as measured fact.
+Tune it if rosters read as uniformly ahead or behind.
+
+Two seeding dependencies, both of which will silently disable signals if lost:
+
+- **`roster.acquired_at` must be backdated.** It defaults to `now()`, so a fresh
+  seed gives every member zero days on roster and the pace signal can never
+  fire. `seed:trainers` spreads tenure deliberately.
+- **Some review history must exist.** With none, "never reviewed" fires for
+  nearly every member and the queue flags everything, which is useless as a
+  triage list. `seed:trainers` reviews two thirds of roster Pokémon — but only
+  those with **no** activity rows, so hand-set flags are never overwritten.
 
 ### Status flags: two views of one table
 
@@ -390,6 +439,11 @@ Other scripts: `npm run db:generate` (new migration from schema changes),
 - **Closed modals stay mounted.** Pages render `<Modal open={false}>` rather
   than unmounting, so `document.querySelector('dialog')` can return a *closed*
   dialog. Target `dialog[open]` when scripting against one.
+- **Never rewrite a source file with PowerShell `Set-Content`.** Windows
+  PowerShell 5.1 reads with the ANSI codepage and writes UTF-8, which turns
+  `Pokémon` into `PokÃ©mon` across the file. This has already happened once and
+  needed a cp1252 round-trip to undo. Use the editing tools, which are UTF-8
+  safe. To check: search the tree for `Ã©`, `â€`, or U+FFFD.
 - **npm ≥ 11 blocks install scripts by default.** esbuild (used by tsx, vite, and
   drizzle-kit) needs its postinstall to fetch a platform binary. The approvals
   live in the root `package.json` under `allowScripts`; after adding a dependency
@@ -419,8 +473,9 @@ proxy that forwards `/api` to the Express server, mirroring the Vite dev proxy.
 
 ## Not yet built
 
-See [TODO.md](TODO.md) for the scheduled backlog (needs-attention queue, then
-the interactivity layer) and the full list of known gaps. The short version:
+See [TODO.md](TODO.md) for the scheduled backlog (needs-attention queue, the
+interactivity layer, then the unused PokéAPI fields) and the full list of known
+gaps. The short version:
 no auth (`owner` is one hardcoded constant), no tests, no dark mode
 (deprioritised), a single ~640 kB JS chunk, and trainer history capped at 50
 rows without pagination.

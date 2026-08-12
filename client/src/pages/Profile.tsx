@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Bar,
@@ -27,6 +27,7 @@ import { PageHeader } from '../components/PageHeader';
 import { NoteActions, NoteComposer } from '../components/NoteEditor';
 import { PokemonQuickSearch } from '../components/PokemonQuickSearch';
 import { EvolutionChain } from '../components/EvolutionProgress';
+import { useToast } from '../components/Toast';
 import {
   ACTIVITY_META,
   ROSTER_STATUS_META,
@@ -56,6 +57,14 @@ export function ProfilePage() {
   const [togglingKind, setTogglingKind] = useState<ActivityKind | null>(null);
   const [removingId, setRemovingId] = useState<number | null>(null);
   const [activityError, setActivityError] = useState<string | null>(null);
+  /** Pending flag states, applied over the server's until the refetch lands. */
+  const [optimisticKinds, setOptimisticKinds] = useState<Partial<Record<ActivityKind, boolean>>>({});
+  const { toast, confirmable } = useToast();
+
+  // Once fresh data arrives the optimistic layer has served its purpose.
+  useEffect(() => {
+    setOptimisticKinds({});
+  }, [data]);
 
   if (loading && !data) {
     return (
@@ -76,7 +85,12 @@ export function ProfilePage() {
   if (!data) return null;
 
   const { pokemon, notes, activity, neighbours, ranking, trainers, evolution } = data;
+  // Server truth, overlaid with any in-flight optimistic toggles.
   const activeKinds = new Set(activity.map((a) => a.kind));
+  for (const [kind, isActive] of Object.entries(optimisticKinds)) {
+    if (isActive) activeKinds.add(kind as ActivityKind);
+    else activeKinds.delete(kind as ActivityKind);
+  }
   const lastReviewed = activity.find((a) => a.kind === 'reviewed')?.updatedAt ?? null;
 
   const statData = STAT_FIELDS.map((field) => ({
@@ -84,32 +98,51 @@ export function ProfilePage() {
     value: pokemon[field.key],
   }));
 
+  /**
+   * Optimistic: the chip flips immediately and only rolls back if the request
+   * fails. `reviewed` is never "off", so its optimistic state is always on.
+   */
   async function toggleActivity(kind: ActivityKind) {
+    const wasActive = activeKinds.has(kind);
+    const willBeActive = kind === 'reviewed' ? true : !wasActive;
+
+    setOptimisticKinds((current) => ({ ...current, [kind]: willBeActive }));
     setTogglingKind(kind);
     setActivityError(null);
+
     try {
       await api.post('/api/activity/toggle', { pokemonId: pokemon.id, kind });
       refetch();
     } catch (err) {
-      setActivityError(err instanceof Error ? err.message : 'Could not update the status');
+      // Roll back to whatever the server last told us.
+      setOptimisticKinds((current) => {
+        const next = { ...current };
+        delete next[kind];
+        return next;
+      });
+      const message = err instanceof Error ? err.message : 'Could not update the status';
+      setActivityError(message);
+      toast(message, { tone: 'error' });
     } finally {
       setTogglingKind(null);
     }
   }
 
-  /** Removes a single log entry, which also clears the matching status flag. */
-  async function removeActivity(activityId: number, label: string) {
-    if (!window.confirm(`Remove the "${label}" entry from ${pokemon.displayName}'s log?`)) return;
+  /**
+   * Removes a log entry. No confirm dialog — the toast offers Undo, which
+   * re-toggles the flag back on.
+   */
+  async function removeActivity(activityId: number, kind: ActivityKind, label: string) {
     setRemovingId(activityId);
     setActivityError(null);
-    try {
-      await api.delete(`/api/activity/${activityId}`);
-      refetch();
-    } catch (err) {
-      setActivityError(err instanceof Error ? err.message : 'Could not remove the entry');
-    } finally {
-      setRemovingId(null);
-    }
+    await confirmable({
+      message: `Removed “${label}” from ${pokemon.displayName}`,
+      perform: () => api.delete(`/api/activity/${activityId}`),
+      undo: () => api.post('/api/activity/toggle', { pokemonId: pokemon.id, kind }),
+      onSettled: refetch,
+      onError: setActivityError,
+    });
+    setRemovingId(null);
   }
 
   return (
@@ -275,7 +308,7 @@ export function ProfilePage() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => removeActivity(entry.id, meta.label)}
+                          onClick={() => removeActivity(entry.id, entry.kind, meta.label)}
                           disabled={removingId === entry.id}
                           className="shrink-0 text-xs text-muted hover:text-status-critical disabled:opacity-50"
                         >
@@ -375,7 +408,7 @@ export function ProfilePage() {
                     }}
                   />
                   {/* Single series — no legend needed; the card title names it. */}
-                  <Bar dataKey="value" name="Base stat" radius={[0, 4, 4, 0]} barSize={16}>
+                  <Bar isAnimationActive={false} dataKey="value" name="Base stat" radius={[0, 4, 4, 0]} barSize={16}>
                     {statData.map((entry) => (
                       <Cell key={entry.label} fill="var(--color-brand)" />
                     ))}

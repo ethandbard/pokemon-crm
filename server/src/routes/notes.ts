@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, desc, eq, ilike, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { notes, pokemon, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound } from '../http.js';
@@ -122,6 +122,44 @@ notesRouter.post(
       .returning();
 
     res.status(201).json(created);
+  }),
+);
+
+const bulkSchema = z.object({
+  pokemonIds: z.array(z.number().int().min(1)).min(1).max(200),
+  body: z.string().trim().min(1, 'Note cannot be empty').max(5000),
+  owner: z.string().trim().min(1).max(200).optional(),
+});
+
+/** POST /api/notes/bulk — write the same note against many Pokémon. */
+notesRouter.post(
+  '/bulk',
+  asyncHandler(async (req, res) => {
+    const input = bulkSchema.parse(req.body);
+
+    const existing = await db
+      .select({ id: pokemon.id })
+      .from(pokemon)
+      .where(inArray(pokemon.id, input.pokemonIds));
+    if (existing.length !== input.pokemonIds.length) {
+      const found = new Set(existing.map((row) => row.id));
+      throw badRequest(
+        `Unknown Pokémon id(s): ${input.pokemonIds.filter((id) => !found.has(id)).join(', ')}`,
+      );
+    }
+
+    const created = await db
+      .insert(notes)
+      .values(
+        input.pokemonIds.map((pokemonId) => ({
+          pokemonId,
+          body: input.body,
+          owner: input.owner ?? DEFAULT_OWNER,
+        })),
+      )
+      .returning({ id: notes.id });
+
+    res.status(201).json({ created: created.length, ids: created.map((n) => n.id) });
   }),
 );
 

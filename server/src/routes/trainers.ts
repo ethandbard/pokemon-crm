@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { activity, notes, pokemon, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound } from '../http.js';
@@ -134,6 +134,57 @@ trainersRouter.delete(
       .returning({ id: trainers.id });
     if (!deleted) throw notFound(`No trainer with id ${id}`);
     res.status(204).end();
+  }),
+);
+
+/**
+ * POST /api/trainers/:id/roster/bulk — add several Pokémon at once.
+ *
+ * Pokémon already on the roster are skipped rather than erroring, so adding a
+ * selection that partly overlaps still does the useful part. The response says
+ * what was added and what was skipped.
+ */
+trainersRouter.post(
+  '/:id/roster/bulk',
+  asyncHandler(async (req, res) => {
+    const { id } = idParamSchema.parse(req.params);
+    const input = z
+      .object({ pokemonIds: z.array(z.number().int().min(1)).min(1).max(200) })
+      .parse(req.body);
+
+    const [trainer] = await db
+      .select({ id: trainers.id })
+      .from(trainers)
+      .where(eq(trainers.id, id))
+      .limit(1);
+    if (!trainer) throw notFound(`No trainer with id ${id}`);
+
+    const valid = await db
+      .select({ id: pokemon.id })
+      .from(pokemon)
+      .where(inArray(pokemon.id, input.pokemonIds));
+    const validIds = new Set(valid.map((row) => row.id));
+
+    const already = await db
+      .select({ pokemonId: roster.pokemonId })
+      .from(roster)
+      .where(and(eq(roster.trainerId, id), inArray(roster.pokemonId, input.pokemonIds)));
+    const alreadyIds = new Set(already.map((row) => row.pokemonId));
+
+    const toAdd = input.pokemonIds.filter((pid) => validIds.has(pid) && !alreadyIds.has(pid));
+
+    if (toAdd.length > 0) {
+      await db
+        .insert(roster)
+        .values(toAdd.map((pokemonId) => ({ trainerId: id, pokemonId })))
+        .onConflictDoNothing();
+    }
+
+    res.status(201).json({
+      added: toAdd.length,
+      skippedAlreadyOnRoster: alreadyIds.size,
+      skippedUnknown: input.pokemonIds.filter((pid) => !validIds.has(pid)).length,
+    });
   }),
 );
 

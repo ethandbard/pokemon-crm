@@ -11,7 +11,7 @@
  */
 import { sql } from 'drizzle-orm';
 import { db, pool } from '../db/client.js';
-import { pokemon, type NewPokemon } from '../db/schema.js';
+import { growthRates, pokemon, type NewPokemon } from '../db/schema.js';
 import { env } from '../env.js';
 import { generationForDexNumber } from '../constants.js';
 
@@ -45,6 +45,12 @@ interface SpeciesResponse {
   is_mythical: boolean;
   color: NamedRef | null;
   evolution_chain: { url: string } | null;
+  growth_rate: NamedRef | null;
+}
+
+interface GrowthRateResponse {
+  name: string;
+  levels: { level: number; experience: number }[];
 }
 
 interface ChainLink {
@@ -194,6 +200,7 @@ async function buildRow(dex: number): Promise<BuiltRow | null> {
     captureRate: species?.capture_rate ?? null,
     abilities: detail.abilities.map((a) => a.ability.name),
     color: species?.color?.name ?? null,
+    growthRate: species?.growth_rate?.name ?? null,
     isLegendary: species?.is_legendary ?? false,
     isMythical: species?.is_mythical ?? false,
     spriteUrl: detail.sprites.front_default,
@@ -309,6 +316,7 @@ async function main() {
           captureRate: sql`excluded.capture_rate`,
           abilities: sql`excluded.abilities`,
           color: sql`excluded.color`,
+          growthRate: sql`excluded.growth_rate`,
           isLegendary: sql`excluded.is_legendary`,
           isMythical: sql`excluded.is_mythical`,
           spriteUrl: sql`excluded.sprite_url`,
@@ -323,6 +331,37 @@ async function main() {
           updatedAt: sql`now()`,
         },
       });
+  }
+
+  // --- Third pass: growth-rate EXP curves ---------------------------------
+  // Six curves, so this is six requests regardless of SEED_LIMIT. The real
+  // tables are stored rather than a fitted formula.
+  const curveNames = [...new Set(valid.map((row) => row.growthRate).filter((n): n is string => !!n))];
+  console.log(`[seed] fetching ${curveNames.length} growth-rate curves…`);
+
+  const curveRows: { name: string; level: number; experience: number }[] = [];
+  for (const name of curveNames) {
+    try {
+      const curve = await fetchJson<GrowthRateResponse>(`${POKEAPI}/growth-rate/${name}`);
+      for (const entry of curve.levels) {
+        curveRows.push({ name, level: entry.level, experience: entry.experience });
+      }
+    } catch (err) {
+      console.warn(`[seed] growth rate ${name} failed: ${String(err)}`);
+    }
+  }
+
+  if (curveRows.length > 0) {
+    for (let i = 0; i < curveRows.length; i += CHUNK) {
+      await db
+        .insert(growthRates)
+        .values(curveRows.slice(i, i + CHUNK))
+        .onConflictDoUpdate({
+          target: [growthRates.name, growthRates.level],
+          set: { experience: sql`excluded.experience` },
+        });
+    }
+    console.log(`[seed] wrote ${curveRows.length} growth-rate levels.`);
   }
 
   const [{ count } = { count: 0 }] = await db

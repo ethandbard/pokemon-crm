@@ -109,6 +109,52 @@ export interface RosterMember {
   milestoneEligible: boolean;
 }
 
+export type AttentionReasonCode =
+  | 'never_reviewed'
+  | 'stale_review'
+  | 'flagged'
+  | 'milestone_overdue'
+  | 'behind_pace';
+
+export interface AttentionReason {
+  code: AttentionReasonCode;
+  /** Weighted contribution to the score, so the UI can show what dominates. */
+  points: number;
+  label: string;
+}
+
+export interface AttentionItem {
+  rosterId: number;
+  trainerId: number;
+  trainerName: string;
+  pokemonId: number;
+  displayName: string;
+  nickname: string | null;
+  spriteUrl: string | null;
+  type1: string;
+  type2: string | null;
+  level: number | null;
+  status: RosterStatus;
+  daysOnRoster: number;
+  daysSinceReview: number | null;
+  isFlagged: boolean;
+  milestoneOverdue: boolean;
+  nextEvolutionName: string | null;
+  nextEvolutionLevel: number | null;
+  expectedLevel: number | null;
+  score: number;
+  reasons: AttentionReason[];
+}
+
+export interface AttentionResponse {
+  data: AttentionItem[];
+  /** Roster members considered (excludes retired). */
+  scanned: number;
+  /** How many had at least one firing signal. */
+  flagged: number;
+  model: { staleAfterDays: number; behindPaceTolerance: number; expPerDay: number };
+}
+
 export interface EvolutionLink {
   id: number;
   displayName: string;

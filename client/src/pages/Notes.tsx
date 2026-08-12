@@ -15,6 +15,7 @@ import {
 } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
 import { NoteActions } from '../components/NoteEditor';
+import { SavedViews } from '../components/SavedViews';
 import { dexNumber, formatDate } from '../lib/format';
 
 const SORT_OPTIONS = [
@@ -130,6 +131,22 @@ export function NotesPage() {
             Clear filters
           </Button>
         )}
+
+        <span className="ml-auto flex gap-2">
+          <SavedViews
+            storageKey="notes"
+            current={{ search, owner, trainerId, sort, direction }}
+            hasActiveFilters={hasFilters}
+            onApply={(state) => {
+              setSearch(String(state.search ?? ''));
+              setOwner(String(state.owner ?? ''));
+              setTrainerId(String(state.trainerId ?? ''));
+              setSort(String(state.sort ?? 'createdAt'));
+              setDirection(state.direction === 'asc' ? 'asc' : 'desc');
+              setPage(1);
+            }}
+          />
+        </span>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-hairline bg-surface">

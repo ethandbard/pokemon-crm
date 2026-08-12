@@ -15,6 +15,7 @@ import {
   TypeBadge,
 } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
+import { SavedViews } from '../components/SavedViews';
 import { ACTIVITY_META, dexNumber, formatDate } from '../lib/format';
 
 /** Sortable columns, keyed to the API's `sort` allow-list. */
@@ -181,6 +182,23 @@ export function ActivityPage() {
             Clear filters
           </Button>
         )}
+
+        <span className="ml-auto flex gap-2">
+          <SavedViews
+            storageKey="activity"
+            current={{ search, kind, owner, trainerId, sort, direction }}
+            hasActiveFilters={hasFilters}
+            onApply={(state) => {
+              setSearch(String(state.search ?? ''));
+              setKind(String(state.kind ?? ''));
+              setOwner(String(state.owner ?? ''));
+              setTrainerId(String(state.trainerId ?? ''));
+              setSort(String(state.sort ?? 'updatedAt'));
+              setDirection(state.direction === 'asc' ? 'asc' : 'desc');
+              setPage(1);
+            }}
+          />
+        </span>
       </div>
 
       {actionError && (

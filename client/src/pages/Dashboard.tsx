@@ -177,7 +177,7 @@ export function DashboardPage() {
                   {...tooltipProps}
                   labelFormatter={(_label, payload) => payload?.[0]?.payload?.range ?? ''}
                 />
-                <Bar dataKey="count" name="Pokémon" fill={SERIES_1} radius={[4, 4, 0, 0]} />
+                <Bar isAnimationActive={false} dataKey="count" name="Pokémon" fill={SERIES_1} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -198,8 +198,8 @@ export function DashboardPage() {
                   iconType="circle"
                   iconSize={8}
                 />
-                <Bar dataKey="Average" fill={SERIES_1} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Median" fill={SERIES_2} radius={[4, 4, 0, 0]} />
+                <Bar isAnimationActive={false} dataKey="Average" fill={SERIES_1} radius={[4, 4, 0, 0]} />
+                <Bar isAnimationActive={false} dataKey="Median" fill={SERIES_2} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -218,7 +218,7 @@ export function DashboardPage() {
                 <XAxis dataKey="type" {...axisProps} angle={-35} textAnchor="end" height={60} />
                 <YAxis {...axisProps} />
                 <Tooltip {...tooltipProps} />
-                <Bar dataKey="count" name="Pokémon" fill={SERIES_1} radius={[4, 4, 0, 0]} />
+                <Bar isAnimationActive={false} dataKey="count" name="Pokémon" fill={SERIES_1} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -236,7 +236,7 @@ export function DashboardPage() {
                 <XAxis dataKey="generation" {...axisProps} tickFormatter={(g) => `Gen ${g}`} />
                 <YAxis {...axisProps} />
                 <Tooltip {...tooltipProps} labelFormatter={(g) => `Generation ${g}`} />
-                <Bar dataKey="count" name="Pokémon" fill={SERIES_1} radius={[4, 4, 0, 0]} />
+                <Bar isAnimationActive={false} dataKey="count" name="Pokémon" fill={SERIES_1} radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -253,7 +253,7 @@ export function DashboardPage() {
                 <XAxis dataKey="generation" {...axisProps} tickFormatter={(g) => `Gen ${g}`} />
                 <YAxis {...axisProps} domain={['dataMin - 20', 'dataMax + 20']} />
                 <Tooltip {...tooltipProps} cursor={{ stroke: 'var(--color-baseline)' }} labelFormatter={(g) => `Generation ${g}`} />
-                <Line
+                <Line isAnimationActive={false}
                   type="monotone"
                   dataKey="avg_base_stat_total"
                   name="Mean BST"
@@ -285,7 +285,7 @@ export function DashboardPage() {
                   formatter={(value: number, name: string) => [value, name]}
                   labelFormatter={() => ''}
                 />
-                <Scatter
+                <Scatter isAnimationActive={false}
                   data={data.scatter}
                   name="Pokémon"
                   fill={SERIES_1}

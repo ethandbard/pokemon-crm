@@ -15,6 +15,8 @@ import type { RosterMember, TrainerDashboardResponse, TrainerListItem } from '..
 import { TrainerForm } from '../components/TrainerForm';
 import { AddRosterMember, EditRosterMember } from '../components/RosterEditor';
 import { EvolutionProgress } from '../components/EvolutionProgress';
+import { AttentionQueue } from '../components/AttentionQueue';
+import { RosterBoard } from '../components/RosterBoard';
 import {
   Button,
   Card,
@@ -231,6 +233,7 @@ function TrainerDashboard({
   const [editingMember, setEditingMember] = useState<RosterMember | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [rosterView, setRosterView] = useState<'table' | 'board'>('table');
 
   if (loading && !data) return <Loading label="Loading roster…" />;
   if (error) return <ErrorState message={error} onRetry={refetch} />;
@@ -369,6 +372,9 @@ function TrainerDashboard({
         />
       </div>
 
+      {/* ---- Early alert: the "what should I do this week" list ---- */}
+      <AttentionQueue trainerId={trainer.id} limit={6} />
+
       {/* ---- The advising hook: who has met a milestone and needs signing off ---- */}
       {eligible.length > 0 && (
         <Card
@@ -414,13 +420,43 @@ function TrainerDashboard({
           {/* ---- Roster table ---- */}
           <Card
             title="Roster"
-            subtitle={`${roster.length} Pokémon — select any row to open its profile`}
+            subtitle={
+              rosterView === 'board'
+                ? `${roster.length} Pokémon — drag a card between columns to change its status`
+                : `${roster.length} Pokémon — select any row to open its profile`
+            }
             actions={
-              <Button variant="primary" onClick={() => setAdding(true)} disabled={busy}>
-                + Add Pokémon
-              </Button>
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-md border border-hairline p-0.5" role="group" aria-label="Roster view">
+                  {(['table', 'board'] as const).map((view) => (
+                    <button
+                      key={view}
+                      type="button"
+                      onClick={() => setRosterView(view)}
+                      aria-pressed={rosterView === view}
+                      className={`rounded px-2.5 py-1 text-xs font-medium capitalize ${
+                        rosterView === view ? 'bg-brand/10 text-brand-strong' : 'text-muted hover:text-ink'
+                      }`}
+                    >
+                      {view}
+                    </button>
+                  ))}
+                </div>
+                <Button variant="primary" onClick={() => setAdding(true)} disabled={busy}>
+                  + Add Pokémon
+                </Button>
+              </div>
             }
           >
+            {rosterView === 'board' ? (
+              <RosterBoard
+                roster={roster}
+                onChanged={() => {
+                  refetch();
+                  onTrainerChanged();
+                }}
+              />
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -551,6 +587,7 @@ function TrainerDashboard({
                 </tbody>
               </table>
             </div>
+            )}
           </Card>
 
           {/* ---- Roster charts ---- */}
@@ -563,7 +600,7 @@ function TrainerDashboard({
                     <XAxis dataKey="type" {...axisProps} angle={-35} textAnchor="end" height={58} />
                     <YAxis {...axisProps} allowDecimals={false} />
                     <Tooltip {...tooltipProps} />
-                    <Bar dataKey="count" name="Pokémon" fill="var(--color-series-1)" radius={[4, 4, 0, 0]} />
+                    <Bar isAnimationActive={false} dataKey="count" name="Pokémon" fill="var(--color-series-1)" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -577,7 +614,7 @@ function TrainerDashboard({
                     <XAxis dataKey="stat" {...axisProps} />
                     <YAxis {...axisProps} />
                     <Tooltip {...tooltipProps} />
-                    <Bar dataKey="avg" name="Mean" fill="var(--color-series-1)" radius={[4, 4, 0, 0]} />
+                    <Bar isAnimationActive={false} dataKey="avg" name="Mean" fill="var(--color-series-1)" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>

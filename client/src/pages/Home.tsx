@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useApi } from '../lib/useApi';
 import type { DashboardResponse } from '../lib/types';
 import { Card, ErrorState, Loading, StatTile } from '../components/ui';
+import { AttentionQueue } from '../components/AttentionQueue';
 
 interface Destination {
   to: string;
@@ -184,6 +185,15 @@ export function HomePage() {
             />
           </div>
         )}
+      </section>
+
+      {/* ---- Workspace-wide early alert, above the navigation cards ---- */}
+      <section className="mb-9" aria-label="Needs attention">
+        <AttentionQueue
+          title="Needs attention across all rosters"
+          limit={6}
+          showTrainer
+        />
       </section>
 
       {/* ---- Where to go ---- */}

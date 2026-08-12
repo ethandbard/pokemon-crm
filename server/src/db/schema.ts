@@ -60,6 +60,12 @@ export const pokemon = pgTable(
 
     abilities: text('abilities').array().notNull().default([]),
     color: text('color'),
+    /**
+     * PokeAPI growth rate name (`medium-slow`, `fast`, …). Joins to
+     * `growth_rates` for the real EXP curve, which is what makes "behind pace"
+     * a curve comparison rather than a guess.
+     */
+    growthRate: text('growth_rate'),
     isLegendary: boolean('is_legendary').notNull().default(false),
     isMythical: boolean('is_mythical').notNull().default(false),
 
@@ -141,6 +147,24 @@ export const activity = pgTable(
     uniqueIndex('activity_pokemon_owner_kind_idx').on(table.pokemonId, table.owner, table.kind),
     index('activity_kind_idx').on(table.kind),
   ],
+);
+
+/**
+ * Cumulative EXP required to reach each level, per growth rate. Six curves ×
+ * 100 levels, straight from PokeAPI's `/growth-rate/{name}` — the real tables,
+ * not a fitted formula.
+ *
+ * Used to answer "what level should this Pokémon be by now?" without inventing
+ * a curve. See ATTENTION_WEIGHTS in constants.ts for the pace assumption.
+ */
+export const growthRates = pgTable(
+  'growth_rates',
+  {
+    name: text('name').notNull(),
+    level: integer('level').notNull(),
+    experience: integer('experience').notNull(),
+  },
+  (table) => [uniqueIndex('growth_rates_name_level_idx').on(table.name, table.level)],
 );
 
 /**

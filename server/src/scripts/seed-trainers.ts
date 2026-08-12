@@ -13,7 +13,8 @@
  */
 import { eq, sql } from 'drizzle-orm';
 import { db, pool } from '../db/client.js';
-import { pokemon, roster, trainers, type RosterStatus } from '../db/schema.js';
+import { activity, pokemon, roster, trainers, type RosterStatus } from '../db/schema.js';
+import { DEFAULT_OWNER } from '../constants.js';
 
 interface RosterSpec {
   /** National Dex number. */
@@ -21,6 +22,16 @@ interface RosterSpec {
   nickname?: string;
   level: number;
   status: RosterStatus;
+  /**
+   * How long this Pokémon has been on the roster, backdated from today.
+   *
+   * Without this every entry would be acquired at seed time, giving zero days
+   * on roster — which would make the needs-attention "behind pace" signal
+   * structurally unable to fire. The spread is deliberate: a few long-tenured
+   * members sit below the pace their growth curve implies, so the early-alert
+   * queue has something real to surface.
+   */
+  acquiredDaysAgo: number;
 }
 
 interface TrainerSpec {
@@ -32,6 +43,10 @@ interface TrainerSpec {
   roster: RosterSpec[];
 }
 
+function daysAgo(days: number): Date {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
+
 const TRAINERS: TrainerSpec[] = [
   {
     name: 'Ash Ketchum',
@@ -40,12 +55,13 @@ const TRAINERS: TrainerSpec[] = [
     email: 'ash@pokemon-crm.local',
     bio: 'Generalist with a deep bench. Rotates heavily between regions.',
     roster: [
-      { dex: 25, nickname: 'Sparky', level: 58, status: 'starter' },
-      { dex: 6, level: 52, status: 'active' },
-      { dex: 7, level: 44, status: 'active' },
-      { dex: 12, level: 39, status: 'reserve' },
-      { dex: 95, level: 41, status: 'reserve' },
-      { dex: 143, nickname: 'Naptime', level: 47, status: 'retired' },
+      { dex: 25, nickname: 'Sparky', level: 58, status: 'starter', acquiredDaysAgo: 420 },
+      { dex: 6, level: 52, status: 'active', acquiredDaysAgo: 300 },
+      // Long tenure, modest level — deliberately behind pace.
+      { dex: 7, level: 44, status: 'active', acquiredDaysAgo: 380 },
+      { dex: 12, level: 39, status: 'reserve', acquiredDaysAgo: 90 },
+      { dex: 95, level: 41, status: 'reserve', acquiredDaysAgo: 120 },
+      { dex: 143, nickname: 'Naptime', level: 47, status: 'retired', acquiredDaysAgo: 500 },
     ],
   },
   {
@@ -55,11 +71,11 @@ const TRAINERS: TrainerSpec[] = [
     email: 'misty@pokemon-crm.local',
     bio: 'Cerulean Gym leader. Water specialist building toward a balanced core.',
     roster: [
-      { dex: 121, nickname: 'Stargazer', level: 55, status: 'starter' },
-      { dex: 54, level: 40, status: 'active' },
-      { dex: 118, level: 33, status: 'active' },
-      { dex: 116, level: 29, status: 'reserve' },
-      { dex: 130, nickname: 'Tempest', level: 61, status: 'active' },
+      { dex: 121, nickname: 'Stargazer', level: 55, status: 'starter', acquiredDaysAgo: 330 },
+      { dex: 54, level: 40, status: 'active', acquiredDaysAgo: 400 },
+      { dex: 118, level: 33, status: 'active', acquiredDaysAgo: 70 },
+      { dex: 116, level: 29, status: 'reserve', acquiredDaysAgo: 45 },
+      { dex: 130, nickname: 'Tempest', level: 61, status: 'active', acquiredDaysAgo: 260 },
     ],
   },
   {
@@ -69,10 +85,10 @@ const TRAINERS: TrainerSpec[] = [
     email: 'brock@pokemon-crm.local',
     bio: 'Pewter Gym leader turned breeder. Defensive cores and long-term care.',
     roster: [
-      { dex: 95, nickname: 'Bedrock', level: 50, status: 'starter' },
-      { dex: 74, level: 36, status: 'active' },
-      { dex: 111, level: 38, status: 'active' },
-      { dex: 185, level: 42, status: 'reserve' },
+      { dex: 95, nickname: 'Bedrock', level: 50, status: 'starter', acquiredDaysAgo: 290 },
+      { dex: 74, level: 36, status: 'active', acquiredDaysAgo: 350 },
+      { dex: 111, level: 38, status: 'active', acquiredDaysAgo: 110 },
+      { dex: 185, level: 42, status: 'reserve', acquiredDaysAgo: 150 },
     ],
   },
   {
@@ -82,12 +98,12 @@ const TRAINERS: TrainerSpec[] = [
     email: 'gary@pokemon-crm.local',
     bio: 'Researcher-in-training. Roster skews toward high base stat totals.',
     roster: [
-      { dex: 9, nickname: 'Torrent', level: 60, status: 'starter' },
-      { dex: 18, level: 48, status: 'active' },
-      { dex: 51, level: 45, status: 'active' },
-      { dex: 65, level: 53, status: 'active' },
-      { dex: 130, level: 55, status: 'reserve' },
-      { dex: 112, level: 49, status: 'reserve' },
+      { dex: 9, nickname: 'Torrent', level: 60, status: 'starter', acquiredDaysAgo: 400 },
+      { dex: 18, level: 48, status: 'active', acquiredDaysAgo: 200 },
+      { dex: 51, level: 45, status: 'active', acquiredDaysAgo: 160 },
+      { dex: 65, level: 53, status: 'active', acquiredDaysAgo: 220 },
+      { dex: 130, level: 55, status: 'reserve', acquiredDaysAgo: 180 },
+      { dex: 112, level: 49, status: 'reserve', acquiredDaysAgo: 240 },
     ],
   },
   {
@@ -97,10 +113,10 @@ const TRAINERS: TrainerSpec[] = [
     email: 'sabrina@pokemon-crm.local',
     bio: 'Saffron Gym leader. Narrow, highly specialised psychic roster.',
     roster: [
-      { dex: 65, nickname: 'Thoughtform', level: 62, status: 'starter' },
-      { dex: 122, level: 44, status: 'active' },
-      { dex: 97, level: 46, status: 'active' },
-      { dex: 202, level: 40, status: 'reserve' },
+      { dex: 65, nickname: 'Thoughtform', level: 62, status: 'starter', acquiredDaysAgo: 310 },
+      { dex: 122, level: 44, status: 'active', acquiredDaysAgo: 360 },
+      { dex: 97, level: 46, status: 'active', acquiredDaysAgo: 130 },
+      { dex: 202, level: 40, status: 'reserve', acquiredDaysAgo: 95 },
     ],
   },
   {
@@ -110,12 +126,12 @@ const TRAINERS: TrainerSpec[] = [
     email: 'cynthia@pokemon-crm.local',
     bio: 'Champion. The benchmark roster — highest average base stat total.',
     roster: [
-      { dex: 445, nickname: 'Apex', level: 70, status: 'starter' },
-      { dex: 442, level: 64, status: 'active' },
-      { dex: 423, level: 63, status: 'active' },
-      { dex: 350, level: 65, status: 'active' },
-      { dex: 468, level: 66, status: 'active' },
-      { dex: 407, level: 62, status: 'reserve' },
+      { dex: 445, nickname: 'Apex', level: 70, status: 'starter', acquiredDaysAgo: 380 },
+      { dex: 442, level: 64, status: 'active', acquiredDaysAgo: 300 },
+      { dex: 423, level: 63, status: 'active', acquiredDaysAgo: 280 },
+      { dex: 350, level: 65, status: 'active', acquiredDaysAgo: 290 },
+      { dex: 468, level: 66, status: 'active', acquiredDaysAgo: 270 },
+      { dex: 407, level: 62, status: 'reserve', acquiredDaysAgo: 210 },
     ],
   },
   {
@@ -125,10 +141,10 @@ const TRAINERS: TrainerSpec[] = [
     email: 'erika@pokemon-crm.local',
     bio: 'Celadon Gym leader. Grass-type roster with a status-heavy playstyle.',
     roster: [
-      { dex: 45, nickname: 'Bloom', level: 47, status: 'starter' },
-      { dex: 3, level: 43, status: 'active' },
-      { dex: 114, level: 35, status: 'active' },
-      { dex: 71, level: 38, status: 'reserve' },
+      { dex: 45, nickname: 'Bloom', level: 47, status: 'starter', acquiredDaysAgo: 340 },
+      { dex: 3, level: 43, status: 'active', acquiredDaysAgo: 370 },
+      { dex: 114, level: 35, status: 'active', acquiredDaysAgo: 85 },
+      { dex: 71, level: 38, status: 'reserve', acquiredDaysAgo: 140 },
     ],
   },
   {
@@ -138,13 +154,75 @@ const TRAINERS: TrainerSpec[] = [
     email: 'lance@pokemon-crm.local',
     bio: 'Elite Four. Small roster, extremely high average level.',
     roster: [
-      { dex: 149, nickname: 'Skyfall', level: 72, status: 'starter' },
-      { dex: 148, level: 58, status: 'active' },
-      { dex: 130, level: 66, status: 'active' },
-      { dex: 6, level: 60, status: 'reserve' },
+      { dex: 149, nickname: 'Skyfall', level: 72, status: 'starter', acquiredDaysAgo: 410 },
+      { dex: 148, level: 58, status: 'active', acquiredDaysAgo: 250 },
+      { dex: 130, level: 66, status: 'active', acquiredDaysAgo: 320 },
+      { dex: 6, level: 60, status: 'reserve', acquiredDaysAgo: 230 },
     ],
   },
 ];
+
+/**
+ * Gives roster Pokémon a plausible review history.
+ *
+ * Without this, "never reviewed" fires for essentially every roster member and
+ * the needs-attention queue flags ~everything, which makes it useless as a
+ * triage list. Reviewing two thirds — at a spread of dates, some deliberately
+ * stale — lets all five signals show up and lets the ranking mean something.
+ *
+ * **Only touches Pokémon with no activity rows at all**, so anything you have
+ * caught, flagged, or reviewed by hand is left exactly as it is.
+ */
+async function seedReviewHistory() {
+  const candidates = await db.execute<{ pokemon_id: number; idx: number }>(sql`
+    select distinct r.pokemon_id, row_number() over (order by r.pokemon_id) as idx
+    from ${roster} r
+    where not exists (select 1 from ${activity} a where a.pokemon_id = r.pokemon_id)
+  `);
+
+  if (candidates.rows.length === 0) {
+    console.log('[seed:trainers] every roster Pokémon already has activity — review history left alone.');
+    return;
+  }
+
+  let reviewed = 0;
+  let flagged = 0;
+
+  for (const row of candidates.rows) {
+    // Deterministic spread so re-runs and fresh databases agree.
+    const bucket = Number(row.idx) % 3;
+    if (bucket === 0) continue; // A third stay unreviewed — the strongest signal.
+
+    // bucket 1 ? recent (well inside the stale window), bucket 2 ? stale.
+    const days = bucket === 1 ? 5 + (Number(row.idx) % 20) : 45 + (Number(row.idx) % 60);
+    const when = daysAgo(days);
+
+    await db
+      .insert(activity)
+      .values({
+        pokemonId: row.pokemon_id,
+        owner: DEFAULT_OWNER,
+        kind: 'reviewed',
+        createdAt: when,
+        updatedAt: when,
+      })
+      .onConflictDoNothing();
+    reviewed += 1;
+
+    // A couple of explicit concerns so the `flagged` signal is represented.
+    if (Number(row.idx) % 11 === 0) {
+      await db
+        .insert(activity)
+        .values({ pokemonId: row.pokemon_id, owner: DEFAULT_OWNER, kind: 'flagged', createdAt: when, updatedAt: when })
+        .onConflictDoNothing();
+      flagged += 1;
+    }
+  }
+
+  console.log(
+    `[seed:trainers] review history: ${reviewed} reviewed, ${flagged} flagged, ${candidates.rows.length - reviewed} left unreviewed.`,
+  );
+}
 
 async function main() {
   const [{ count = 0 } = {}] = await db
@@ -207,6 +285,7 @@ async function main() {
           nickname: entry.nickname ?? null,
           level: entry.level,
           status: entry.status,
+          acquiredAt: daysAgo(entry.acquiredDaysAgo),
           updatedAt: new Date(),
         })
         .onConflictDoUpdate({
@@ -215,6 +294,9 @@ async function main() {
             nickname: sql`excluded.nickname`,
             level: sql`excluded.level`,
             status: sql`excluded.status`,
+            // Must be in the update set too, or a re-run leaves existing rows
+            // at their original acquired_at and the backdating never lands.
+            acquiredAt: sql`excluded.acquired_at`,
             updatedAt: sql`now()`,
           },
         });
@@ -222,6 +304,8 @@ async function main() {
       rosterRows += 1;
     }
   }
+
+  await seedReviewHistory();
 
   const [totals] = await db
     .select({

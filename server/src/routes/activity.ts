@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { activity, pokemon, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound } from '../http.js';
@@ -164,6 +164,61 @@ activityRouter.post(
       .returning();
 
     res.json({ active: true, kind: input.kind, pokemonId: input.pokemonId, record: row });
+  }),
+);
+
+const bulkSchema = z.object({
+  pokemonIds: z.array(z.number().int().min(1)).min(1).max(200),
+  kind: kindSchema,
+  /** true sets the flag on every id, false clears it. */
+  active: z.boolean(),
+  owner: z.string().trim().min(1).max(200).optional(),
+});
+
+/**
+ * POST /api/activity/bulk — set or clear one flag across many Pokémon.
+ *
+ * Deliberately not a loop over /toggle: toggling would flip each row to the
+ * opposite of whatever it already was, so a mixed selection would end up
+ * inconsistent. Bulk actions set an explicit target state instead.
+ */
+activityRouter.post(
+  '/bulk',
+  asyncHandler(async (req, res) => {
+    const input = bulkSchema.parse(req.body);
+    const owner = input.owner ?? DEFAULT_OWNER;
+
+    const existing = await db
+      .select({ id: pokemon.id })
+      .from(pokemon)
+      .where(inArray(pokemon.id, input.pokemonIds));
+    if (existing.length !== input.pokemonIds.length) {
+      const found = new Set(existing.map((row) => row.id));
+      const missing = input.pokemonIds.filter((id) => !found.has(id));
+      throw badRequest(`Unknown Pokémon id(s): ${missing.join(', ')}`);
+    }
+
+    if (input.active) {
+      await db
+        .insert(activity)
+        .values(input.pokemonIds.map((pokemonId) => ({ pokemonId, owner, kind: input.kind })))
+        .onConflictDoUpdate({
+          target: [activity.pokemonId, activity.owner, activity.kind],
+          set: { updatedAt: sql`now()` },
+        });
+    } else {
+      await db
+        .delete(activity)
+        .where(
+          and(
+            inArray(activity.pokemonId, input.pokemonIds),
+            eq(activity.owner, owner),
+            eq(activity.kind, input.kind),
+          ),
+        );
+    }
+
+    res.json({ updated: input.pokemonIds.length, kind: input.kind, active: input.active });
   }),
 );
 

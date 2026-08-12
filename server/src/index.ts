@@ -10,6 +10,7 @@ import { activityRouter } from './routes/activity.js';
 import { statsRouter } from './routes/stats.js';
 import { trainersRouter } from './routes/trainers.js';
 import { rosterRouter } from './routes/roster.js';
+import { attentionRouter } from './routes/attention.js';
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use('/api/activity', activityRouter);
 app.use('/api/stats', statsRouter);
 app.use('/api/trainers', trainersRouter);
 app.use('/api/roster', rosterRouter);
+app.use('/api/attention', attentionRouter);
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' });

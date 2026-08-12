@@ -15,6 +15,8 @@ import {
 } from '../components/ui';
 import { ACTIVITY_META, dexNumber, titleCase } from '../lib/format';
 import { PageHeader } from '../components/PageHeader';
+import { BulkActionBar } from '../components/BulkActionBar';
+import { SavedViews } from '../components/SavedViews';
 
 const COLUMNS = [
   { key: 'id', label: '#', numeric: true },
@@ -44,8 +46,23 @@ export function LookupPage() {
   const [sort, setSort] = useState('id');
   const [direction, setDirection] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const debouncedSearch = useDebounced(search);
+
+  /** Filter values a saved view captures and restores. */
+  const viewState = { search, type, generation, activity, trainerId, sort, direction };
+
+  function applyView(state: Record<string, string | number | undefined>) {
+    setSearch(String(state.search ?? ''));
+    setType(String(state.type ?? ''));
+    setGeneration(String(state.generation ?? ''));
+    setActivity(String(state.activity ?? ''));
+    setTrainerId(String(state.trainerId ?? ''));
+    setSort(String(state.sort ?? 'id'));
+    setDirection(state.direction === 'desc' ? 'desc' : 'asc');
+    setPage(1);
+  }
 
   const listPath = useMemo(
     () =>
@@ -83,6 +100,35 @@ export function LookupPage() {
       setter(value);
       setPage(1);
     };
+  }
+
+  /*
+   * Selection spans pages: ids are kept in a Set rather than derived from the
+   * current rows, so paging through and picking a few from each page works.
+   * The header checkbox therefore reflects only *this page*.
+   */
+  const pageIds = data?.data.map((row) => row.id) ?? [];
+  const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const someOnPageSelected = pageIds.some((id) => selected.has(id));
+
+  function toggleRow(id: number) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllOnPage(checked: boolean) {
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const id of pageIds) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
   }
 
   const hasFilters = Boolean(search || type || generation || activity || trainerId);
@@ -170,6 +216,15 @@ export function LookupPage() {
             Clear filters
           </Button>
         )}
+
+        <span className="ml-auto flex gap-2">
+          <SavedViews
+            storageKey="lookup"
+            current={viewState}
+            onApply={applyView}
+            hasActiveFilters={hasFilters}
+          />
+        </span>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-hairline bg-surface">
@@ -190,10 +245,32 @@ export function LookupPage() {
           />
         ) : (
           <>
+            <BulkActionBar
+              selectedIds={[...selected]}
+              onClear={() => setSelected(new Set())}
+              onDone={() => {
+                setSelected(new Set());
+                refetch();
+              }}
+            />
+
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-hairline text-xs text-muted">
+                    <th scope="col" className="w-9 px-3 py-2.5">
+                      <input
+                        type="checkbox"
+                        aria-label="Select all rows on this page"
+                        checked={allOnPageSelected}
+                        // Partial selection reads as neither on nor off.
+                        ref={(el) => {
+                          if (el) el.indeterminate = someOnPageSelected && !allOnPageSelected;
+                        }}
+                        onChange={(e) => toggleAllOnPage(e.target.checked)}
+                        className="h-3.5 w-3.5 accent-[var(--color-brand)]"
+                      />
+                    </th>
                     {COLUMNS.map((column) => (
                       <th
                         key={column.label}
@@ -221,7 +298,21 @@ export function LookupPage() {
                 </thead>
                 <tbody className={loading ? 'opacity-60 transition-opacity' : undefined}>
                   {data.data.map((row) => (
-                    <tr key={row.id} className="border-b border-hairline/70 last:border-0 hover:bg-plane">
+                    <tr
+                      key={row.id}
+                      className={`border-b border-hairline/70 last:border-0 ${
+                        selected.has(row.id) ? 'bg-brand/5' : 'hover:bg-plane'
+                      }`}
+                    >
+                      <td className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${row.displayName}`}
+                          checked={selected.has(row.id)}
+                          onChange={() => toggleRow(row.id)}
+                          className="h-3.5 w-3.5 accent-[var(--color-brand)]"
+                        />
+                      </td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">
                         {dexNumber(row.id)}
                       </td>
