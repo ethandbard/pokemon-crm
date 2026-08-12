@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { activity, pokemon } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound } from '../http.js';
@@ -10,35 +10,96 @@ export const activityRouter = Router();
 
 const kindSchema = z.enum(activity.kind.enumValues);
 
-/** GET /api/activity — recent status changes across all Pokémon. */
+/** Columns the activity table may sort by, mapped to real columns. */
+const SORTABLE = {
+  updatedAt: activity.updatedAt,
+  createdAt: activity.createdAt,
+  kind: activity.kind,
+  owner: activity.owner,
+  pokemon: pokemon.displayName,
+  pokemonId: activity.pokemonId,
+} as const;
+
+const listQuerySchema = z.object({
+  search: z.string().trim().max(100).optional(),
+  kind: kindSchema.optional(),
+  owner: z.string().trim().max(200).optional(),
+  pokemonId: z.coerce.number().int().min(1).optional(),
+  sort: z.enum(Object.keys(SORTABLE) as [keyof typeof SORTABLE]).default('updatedAt'),
+  direction: z.enum(['asc', 'desc']).default('desc'),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(25),
+});
+
+/**
+ * GET /api/activity — status flags across all Pokémon, joined to the Pokémon
+ * they belong to. Backs the Activity page's interactive table.
+ */
 activityRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const query = z
-      .object({
-        kind: kindSchema.optional(),
-        limit: z.coerce.number().int().min(1).max(200).default(50),
-      })
-      .parse(req.query);
+    const query = listQuerySchema.parse(req.query);
 
-    const rows = await db
-      .select({
-        id: activity.id,
-        pokemonId: activity.pokemonId,
-        kind: activity.kind,
-        owner: activity.owner,
-        createdAt: activity.createdAt,
-        updatedAt: activity.updatedAt,
-        pokemonName: pokemon.displayName,
-        pokemonSpriteUrl: pokemon.spriteUrl,
-      })
-      .from(activity)
-      .innerJoin(pokemon, eq(activity.pokemonId, pokemon.id))
-      .where(query.kind ? eq(activity.kind, query.kind) : undefined)
-      .orderBy(desc(activity.updatedAt))
-      .limit(query.limit);
+    const filters: SQL[] = [];
+    if (query.search) {
+      const pattern = `%${query.search}%`;
+      const clause = or(ilike(pokemon.displayName, pattern), ilike(pokemon.name, pattern));
+      if (clause) filters.push(clause);
+    }
+    if (query.kind) filters.push(eq(activity.kind, query.kind));
+    if (query.owner) filters.push(eq(activity.owner, query.owner));
+    if (query.pokemonId !== undefined) filters.push(eq(activity.pokemonId, query.pokemonId));
 
-    res.json({ data: rows });
+    const where = filters.length ? and(...filters) : undefined;
+    const orderColumn = SORTABLE[query.sort];
+    const orderBy = query.direction === 'desc' ? desc(orderColumn) : asc(orderColumn);
+
+    const [rows, [totals], owners, kindCounts] = await Promise.all([
+      db
+        .select({
+          id: activity.id,
+          pokemonId: activity.pokemonId,
+          kind: activity.kind,
+          owner: activity.owner,
+          createdAt: activity.createdAt,
+          updatedAt: activity.updatedAt,
+          pokemonName: pokemon.displayName,
+          pokemonSpriteUrl: pokemon.spriteUrl,
+          pokemonType1: pokemon.type1,
+          pokemonType2: pokemon.type2,
+        })
+        .from(activity)
+        .innerJoin(pokemon, eq(activity.pokemonId, pokemon.id))
+        .where(where)
+        .orderBy(orderBy, desc(activity.id))
+        .limit(query.pageSize)
+        .offset((query.page - 1) * query.pageSize),
+      db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(activity)
+        .innerJoin(pokemon, eq(activity.pokemonId, pokemon.id))
+        .where(where),
+      db.selectDistinct({ owner: activity.owner }).from(activity).orderBy(asc(activity.owner)),
+      // Unfiltered totals per kind, so the summary tiles don't move when the
+      // table is filtered.
+      db
+        .select({ kind: activity.kind, count: sql<number>`count(*)::int` })
+        .from(activity)
+        .groupBy(activity.kind),
+    ]);
+
+    res.json({
+      data: rows,
+      owners: owners.map((o) => o.owner),
+      kindCounts: Object.fromEntries(kindCounts.map((k) => [k.kind, k.count])),
+      kinds: activity.kind.enumValues,
+      pagination: {
+        page: query.page,
+        pageSize: query.pageSize,
+        total: totals?.count ?? 0,
+        totalPages: Math.max(1, Math.ceil((totals?.count ?? 0) / query.pageSize)),
+      },
+    });
   }),
 );
 

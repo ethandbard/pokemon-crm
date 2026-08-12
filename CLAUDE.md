@@ -59,9 +59,10 @@ pokemon-crm/
         ├── App.tsx           # sidebar layout + routes
         ├── index.css         # Tailwind import + design tokens (@theme)
         ├── components/
-        │   ├── Sidebar.tsx   # icon rail navigation
+        │   ├── Sidebar.tsx   # icon rail navigation (logo links home)
         │   ├── PageHeader.tsx
         │   ├── NoteEditor.tsx# NoteComposer + NoteActions (edit/delete)
+        │   ├── PokemonQuickSearch.tsx # compact lookup table, used on Profile
         │   └── ui.tsx        # Card, Loading, EmptyState, ErrorState, …
         ├── lib/
         │   ├── api.ts        # fetch wrapper, ApiError, toQueryString
@@ -69,12 +70,29 @@ pokemon-crm/
         │   ├── types.ts      # hand-written API response shapes
         │   └── format.ts     # type colors, unit + date formatting
         └── pages/
+            ├── Home.tsx      # landing page: counters + links to every page
             ├── Lookup.tsx    # searchable/filterable/sortable table
-            ├── Profile.tsx   # detail + notes + status flags
+            ├── Profile.tsx   # detail + notes + activity log + quick search
             ├── Dashboard.tsx # EDA charts
             ├── Notes.tsx     # cross-Pokémon note feed
+            ├── Activity.tsx  # cross-Pokémon status-flag table
             └── Tableau.tsx   # embedded Tableau Public workbook
 ```
+
+### Routes
+
+| Path | Page |
+|---|---|
+| `/` | Home (landing) — the sidebar logo links here |
+| `/lookup` | Pokémon Lookup — reads `?search=` to pre-fill the filter |
+| `/pokemon/:id` | Pokémon Profile |
+| `/dashboard` | Performance Dashboard |
+| `/notes` | Notes |
+| `/activity` | Activity — reads `?pokemonId=` to scope to one Pokémon |
+| `/tableau` | Tableau Dashboard |
+
+Anything unmatched redirects to `/`. **`/` is the landing page, not the
+lookup** — link to `/lookup` when you mean the table.
 
 ---
 
@@ -131,7 +149,7 @@ All routes are under `/api`. Responses are JSON; errors are
 | POST | `/api/notes` | Create |
 | PATCH | `/api/notes/:id` | Update body |
 | DELETE | `/api/notes/:id` | Delete |
-| GET | `/api/activity` | Recent status changes — `kind`, `limit` |
+| GET | `/api/activity` | Status flags joined to their Pokémon — `search`, `kind`, `owner`, `pokemonId`, `sort`, `direction`, pagination. Also returns `owners`, `kinds`, and unfiltered `kindCounts` |
 | POST | `/api/activity/toggle` | Toggle a flag on/off |
 | DELETE | `/api/activity/:id` | Remove one flag row |
 | GET | `/api/stats/dashboard` | Every dashboard aggregation in one round trip — `bucketSize` |
@@ -177,7 +195,21 @@ All routes are under `/api`. Responses are JSON; errors are
 
 Defined once in `client/src/index.css` under Tailwind v4's `@theme`, which
 generates the utilities (`bg-surface`, `text-muted`, `border-hairline`,
-`text-series-1`, …). Add new colors there, not as arbitrary hex in components.
+`text-brand`, …). Add new colors there, not as arbitrary hex in components.
+
+**Two colour systems, deliberately kept apart:**
+
+- **`--color-brand` (`#d92d20`) is the app's accent** — sidebar icons, the logo,
+  primary buttons, focus rings, links, and the Profile's base-stat bars.
+  `--color-brand-strong` (`#b42318`) is the darker step for hover and small
+  text. Measured 4.71:1 as a mark on the chart surface and 4.83:1 with white
+  text on it, so it passes AA in both directions; brand-strong is 6.40:1.
+  It is deliberately **not** `#d03b3b` — that step is reserved for
+  status-critical, and a brand accent must never read as an error state.
+- **`--color-series-1..4` stay the validated categorical palette** and are used
+  by the Performance Dashboard's analytical charts. Recolouring an analytical
+  chart to the brand hue would make the accent look like a data encoding, so
+  don't: chart series come from the series tokens, chrome comes from brand.
 
 ### Charting
 
@@ -195,6 +227,23 @@ Charts follow a fixed set of rules — match them when adding one:
 - **The Pokémon type colors in `lib/format.ts` are for badges only, never chart
   series.** They're a domain convention players recognise, and 18 categories is
   well past what any palette can keep distinguishable.
+- The Profile's base-stat chart is the one chart on `--color-brand`: it's a
+  single-series bar chart of one Pokémon's stats, not a comparison across the
+  dataset, so it reads as page chrome rather than a data encoding.
+
+### Status flags: two views of one table
+
+`activity` is surfaced three ways, all backed by the same rows:
+
+- **Profile → Status** — toggle buttons. Setting a flag inserts a row; unsetting
+  deletes it (`reviewed` excepted, which bumps `updated_at`).
+- **Profile → Activity log** — the same rows as a timestamped history, newest
+  first, each removable. Removing a log entry *is* clearing the flag; there's no
+  separate audit table, so don't present it as one.
+- **Activity page** — every row across all Pokémon, filterable and sortable.
+
+The Activity page's summary tiles use the API's **unfiltered** `kindCounts`, so
+they stay put while you filter the table underneath them.
 
 ### The Tableau embed (`pages/Tableau.tsx`)
 

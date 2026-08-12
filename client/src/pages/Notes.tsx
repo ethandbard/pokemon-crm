@@ -128,7 +128,7 @@ export function NotesPage() {
             action={
               !hasFilters && (
                 <Link
-                  to="/"
+                  to="/lookup"
                   className="rounded-md border border-hairline px-3 py-1.5 text-sm font-medium text-ink hover:bg-plane"
                 >
                   Browse Pokémon

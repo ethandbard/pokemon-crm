@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { toQueryString } from '../lib/api';
 import { useApi, useDebounced } from '../lib/useApi';
 import type { FilterOptions, PokemonListResponse } from '../lib/types';
@@ -32,7 +32,10 @@ const COLUMNS = [
 ] as const;
 
 export function LookupPage() {
-  const [search, setSearch] = useState('');
+  // Seeded from ?search= so links in from elsewhere (e.g. the profile's quick
+  // search) land with the term already applied.
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [type, setType] = useState('');
   const [generation, setGeneration] = useState('');
   const [activity, setActivity] = useState('');
@@ -208,7 +211,7 @@ export function LookupPage() {
                       <td className="px-3 py-2">
                         <Link
                           to={`/pokemon/${row.id}`}
-                          className="flex items-center gap-2 font-medium text-ink hover:text-series-1"
+                          className="flex items-center gap-2 font-medium text-ink hover:text-brand"
                         >
                           {row.spriteUrl && (
                             <img

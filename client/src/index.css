@@ -20,6 +20,18 @@
   --color-series-3: #1baf7a;
   --color-series-4: #eda100;
 
+  /*
+   * Brand red — the app's accent for navigation and the profile's base-stat
+   * bars. 4.71:1 against the chart surface and 4.83:1 with white text on it,
+   * so it passes AA as both a mark and a background. `brand-strong` is the
+   * darker step for small text and hover, at 6.40:1.
+   *
+   * Deliberately NOT #d03b3b: that step is reserved for status-critical, and a
+   * brand accent must never impersonate an error state.
+   */
+  --color-brand: #d92d20;
+  --color-brand-strong: #b42318;
+
   --color-status-good: #0ca30c;
   --color-status-warning: #fab219;
   --color-status-critical: #d03b3b;

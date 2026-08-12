@@ -25,9 +25,8 @@ const icon = (path: React.ReactNode) => (
 
 const NAV_ITEMS: NavItem[] = [
   {
-    to: '/',
+    to: '/lookup',
     label: 'Pokémon Lookup',
-    end: true,
     icon: icon(
       <>
         <circle cx="11" cy="11" r="7" />
@@ -68,6 +67,15 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    to: '/activity',
+    label: 'Activity',
+    icon: icon(
+      <>
+        <path d="M3 12h4l2.5-6 4 13 2.5-7H21" />
+      </>,
+    ),
+  },
+  {
     to: '/tableau',
     label: 'Tableau Dashboard',
     icon: icon(
@@ -86,12 +94,19 @@ export function Sidebar() {
       aria-label="Primary"
       className="flex w-16 shrink-0 flex-col items-center gap-1 border-r border-hairline bg-surface py-4"
     >
-      <div
-        className="mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-series-1 text-sm font-bold text-white"
-        title="Pokémon CRM"
+      {/* The logo is the link home — see the Home page for the landing view. */}
+      <NavLink
+        to="/"
+        end
+        title="Pokémon CRM — home"
+        className="group relative mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-sm font-bold text-white transition-colors hover:bg-brand-strong"
       >
         P
-      </div>
+        <span className="sr-only">Pokémon CRM home</span>
+        <span className="pointer-events-none absolute left-full z-20 ml-2 hidden whitespace-nowrap rounded-md bg-ink px-2 py-1 text-xs font-normal text-white group-hover:block">
+          Pokémon CRM — home
+        </span>
+      </NavLink>
 
       {NAV_ITEMS.map((item) => (
         <NavLink
@@ -102,7 +117,7 @@ export function Sidebar() {
           className={({ isActive }) =>
             [
               'group relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
-              isActive ? 'bg-series-1/10 text-series-1' : 'text-muted hover:bg-plane hover:text-ink',
+              isActive ? 'bg-brand/10 text-brand' : 'text-muted hover:bg-plane hover:text-brand',
             ].join(' ')
           }
         >

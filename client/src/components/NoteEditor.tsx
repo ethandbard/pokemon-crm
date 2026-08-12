@@ -35,7 +35,7 @@ export function NoteComposer({ pokemonId, onSaved }: { pokemonId: number; onSave
         onChange={(e) => setBody(e.target.value)}
         rows={3}
         placeholder="Add a note — observations, follow-ups, training plans…"
-        className="w-full resize-y rounded-md border border-hairline bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-muted focus:border-series-1 focus:ring-1 focus:ring-series-1"
+        className="w-full resize-y rounded-md border border-hairline bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-muted focus:border-brand focus:ring-1 focus:ring-brand"
       />
       {error && <p className="text-xs text-status-critical">{error}</p>}
       <div className="flex justify-end">
@@ -98,7 +98,7 @@ export function NoteActions({
           onChange={(e) => setDraft(e.target.value)}
           rows={3}
           aria-label="Edit note"
-          className="w-full resize-y rounded-md border border-hairline bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-series-1 focus:ring-1 focus:ring-series-1"
+          className="w-full resize-y rounded-md border border-hairline bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-brand focus:ring-1 focus:ring-brand"
         />
         {error && <p className="text-xs text-status-critical">{error}</p>}
         <div className="flex gap-2">
@@ -125,7 +125,7 @@ export function NoteActions({
       <button
         type="button"
         onClick={() => setEditing(true)}
-        className="text-muted hover:text-series-1"
+        className="text-muted hover:text-brand"
         disabled={busy}
       >
         Edit

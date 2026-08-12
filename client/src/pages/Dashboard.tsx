@@ -128,6 +128,39 @@ export function DashboardPage() {
         <StatTile label="Mythical" value={summary.mythical} />
       </div>
 
+      {/* ---- CRM activity: sits directly under the headline tiles ---- */}
+      <Card
+        title="CRM activity"
+        subtitle="Notes and status flags recorded in this workspace"
+        className="mb-5"
+        actions={
+          <Link to="/activity" className="text-xs font-medium text-brand hover:underline">
+            View activity table →
+          </Link>
+        }
+      >
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+          <StatTile label="Notes" value={crm?.note_count ?? 0} />
+          <StatTile label="Pokémon with notes" value={crm?.pokemon_with_notes ?? 0} />
+          {(Object.keys(ACTIVITY_META) as (keyof typeof ACTIVITY_META)[]).map((kind) => (
+            <StatTile
+              key={kind}
+              label={ACTIVITY_META[kind].label}
+              value={crm?.activity_counts?.[kind] ?? 0}
+            />
+          ))}
+        </div>
+        {(crm?.note_count ?? 0) === 0 && (
+          <p className="mt-4 text-sm text-muted">
+            No CRM activity yet — open a{' '}
+            <Link to="/lookup" className="text-brand hover:underline">
+              Pokémon profile
+            </Link>{' '}
+            to add a note or set a status flag.
+          </p>
+        )}
+      </Card>
+
       <div className="grid gap-5 lg:grid-cols-2">
         {/* ---- Distribution ---- */}
         <Card
@@ -302,33 +335,6 @@ export function DashboardPage() {
           )}
         </Card>
 
-        {/* ---- CRM activity ---- */}
-        <Card
-          title="CRM activity"
-          subtitle="Notes and status flags recorded in this workspace"
-          className="lg:col-span-2"
-        >
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
-            <StatTile label="Notes" value={crm?.note_count ?? 0} />
-            <StatTile label="Pokémon with notes" value={crm?.pokemon_with_notes ?? 0} />
-            {(Object.keys(ACTIVITY_META) as (keyof typeof ACTIVITY_META)[]).map((kind) => (
-              <StatTile
-                key={kind}
-                label={ACTIVITY_META[kind].label}
-                value={crm?.activity_counts?.[kind] ?? 0}
-              />
-            ))}
-          </div>
-          {(crm?.note_count ?? 0) === 0 && (
-            <p className="mt-4 text-sm text-muted">
-              No CRM activity yet — open a{' '}
-              <Link to="/" className="text-series-1 hover:underline">
-                Pokémon profile
-              </Link>{' '}
-              to add a note or set a status flag.
-            </p>
-          )}
-        </Card>
       </div>
     </div>
   );

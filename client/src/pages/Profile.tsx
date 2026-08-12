@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts';
 import { useApi } from '../lib/useApi';
-import { api } from '../lib/api';
+import { api, toQueryString } from '../lib/api';
 import type { ActivityKind, PokemonProfileResponse } from '../lib/types';
 import {
   Button,
@@ -25,6 +25,7 @@ import {
 } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
 import { NoteActions, NoteComposer } from '../components/NoteEditor';
+import { PokemonQuickSearch } from '../components/PokemonQuickSearch';
 import {
   ACTIVITY_META,
   dexNumber,
@@ -51,6 +52,8 @@ export function ProfilePage() {
   const navigate = useNavigate();
   const { data, loading, error, refetch } = useApi<PokemonProfileResponse>(`/api/pokemon/${id}`);
   const [togglingKind, setTogglingKind] = useState<ActivityKind | null>(null);
+  const [removingId, setRemovingId] = useState<number | null>(null);
+  const [activityError, setActivityError] = useState<string | null>(null);
 
   if (loading && !data) {
     return (
@@ -81,11 +84,29 @@ export function ProfilePage() {
 
   async function toggleActivity(kind: ActivityKind) {
     setTogglingKind(kind);
+    setActivityError(null);
     try {
       await api.post('/api/activity/toggle', { pokemonId: pokemon.id, kind });
       refetch();
+    } catch (err) {
+      setActivityError(err instanceof Error ? err.message : 'Could not update the status');
     } finally {
       setTogglingKind(null);
+    }
+  }
+
+  /** Removes a single log entry, which also clears the matching status flag. */
+  async function removeActivity(activityId: number, label: string) {
+    if (!window.confirm(`Remove the "${label}" entry from ${pokemon.displayName}'s log?`)) return;
+    setRemovingId(activityId);
+    setActivityError(null);
+    try {
+      await api.delete(`/api/activity/${activityId}`);
+      refetch();
+    } catch (err) {
+      setActivityError(err instanceof Error ? err.message : 'Could not remove the entry');
+    } finally {
+      setRemovingId(null);
     }
   }
 
@@ -179,7 +200,7 @@ export function ProfilePage() {
                     className={[
                       'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50',
                       active
-                        ? 'border-series-1 bg-series-1/10 text-series-1'
+                        ? 'border-brand bg-brand/10 text-brand-strong'
                         : 'border-hairline bg-surface text-muted hover:text-ink',
                     ].join(' ')}
                   >
@@ -192,6 +213,81 @@ export function ProfilePage() {
             {lastReviewed && (
               <p className="mt-3 text-xs text-muted">Last reviewed {formatDate(lastReviewed)}</p>
             )}
+          </Card>
+
+          <Card
+            title="Activity log"
+            subtitle={`${activity.length} ${activity.length === 1 ? 'entry' : 'entries'} for this Pokémon`}
+            actions={
+              activity.length > 0 ? (
+                <Link
+                  to={`/activity${toQueryString({ pokemonId: pokemon.id })}`}
+                  className="text-xs font-medium text-brand hover:underline"
+                >
+                  View all →
+                </Link>
+              ) : undefined
+            }
+          >
+            {activityError && (
+              <p className="mb-3 text-xs text-status-critical">
+                <span aria-hidden="true">▲ </span>
+                {activityError}
+              </p>
+            )}
+
+            {activity.length === 0 ? (
+              <EmptyState
+                title="No activity yet"
+                description="Set a status above and it will be logged here with a timestamp."
+              />
+            ) : (
+              <ol className="space-y-2">
+                {/* Newest first — the log reads as a history. */}
+                {[...activity]
+                  .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+                  .map((entry) => {
+                    const meta = ACTIVITY_META[entry.kind];
+                    const reSet = entry.updatedAt !== entry.createdAt;
+                    return (
+                      <li
+                        key={entry.id}
+                        className="flex items-start gap-2.5 rounded-lg border border-hairline p-2.5"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand/10 text-[11px] text-brand-strong"
+                        >
+                          {meta.icon}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-ink">{meta.label}</p>
+                          <p className="mt-0.5 text-xs text-muted">
+                            {reSet ? 'Updated' : 'Set'} {formatDate(entry.updatedAt)}
+                          </p>
+                          {reSet && (
+                            <p className="text-xs text-muted">
+                              First set {formatDate(entry.createdAt)}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeActivity(entry.id, meta.label)}
+                          disabled={removingId === entry.id}
+                          className="shrink-0 text-xs text-muted hover:text-status-critical disabled:opacity-50"
+                        >
+                          {removingId === entry.id ? 'Removing…' : 'Remove'}
+                        </button>
+                      </li>
+                    );
+                  })}
+              </ol>
+            )}
+          </Card>
+
+          <Card title="Find a Pokémon" subtitle="Search without leaving this page">
+            <PokemonQuickSearch currentId={pokemon.id} />
           </Card>
         </div>
 
@@ -232,7 +328,7 @@ export function ProfilePage() {
                   {/* Single series — no legend needed; the card title names it. */}
                   <Bar dataKey="value" name="Base stat" radius={[0, 4, 4, 0]} barSize={16}>
                     {statData.map((entry) => (
-                      <Cell key={entry.label} fill="var(--color-series-1)" />
+                      <Cell key={entry.label} fill="var(--color-brand)" />
                     ))}
                     <LabelList
                       dataKey="value"
@@ -275,7 +371,7 @@ export function ProfilePage() {
 
           <p className="text-xs text-muted">
             Looking for another Pokémon?{' '}
-            <Link to="/" className="text-series-1 hover:underline">
+            <Link to="/lookup" className="text-brand hover:underline">
               Back to lookup
             </Link>
           </p>

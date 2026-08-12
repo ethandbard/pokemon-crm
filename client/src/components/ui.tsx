@@ -49,7 +49,7 @@ export function Loading({ label = 'Loading…', rows = 0 }: { label?: string; ro
       role="status"
       aria-live="polite"
     >
-      <span className="h-4 w-4 animate-spin rounded-full border-2 border-hairline border-t-series-1" />
+      <span className="h-4 w-4 animate-spin rounded-full border-2 border-hairline border-t-brand" />
       {label}
     </div>
   );
@@ -129,7 +129,7 @@ export function Button({
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' }) {
   const styles = {
-    primary: 'bg-series-1 text-white hover:bg-series-1/90 border-transparent',
+    primary: 'bg-brand text-white hover:bg-brand-strong border-transparent',
     secondary: 'bg-surface text-ink hover:bg-plane border-hairline',
     danger: 'bg-surface text-status-critical hover:bg-status-critical/5 border-hairline',
   }[variant];
@@ -145,7 +145,7 @@ export function Button({
 }
 
 const controlClass =
-  'rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-sm text-ink outline-none focus:border-series-1 focus:ring-1 focus:ring-series-1';
+  'rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-sm text-ink outline-none focus:border-brand focus:ring-1 focus:ring-brand';
 
 export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={`${controlClass} ${props.className ?? ''}`} />;

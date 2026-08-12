@@ -84,6 +84,23 @@ export interface ActivityRecord {
   updatedAt: string;
 }
 
+/** Row shape returned by `GET /api/activity` — joined to its Pokémon. */
+export interface ActivityWithPokemon extends ActivityRecord {
+  pokemonName: string;
+  pokemonSpriteUrl: string | null;
+  pokemonType1: string;
+  pokemonType2: string | null;
+}
+
+export interface ActivityListResponse {
+  data: ActivityWithPokemon[];
+  owners: string[];
+  /** Unfiltered totals per kind, so summary tiles don't move when filtering. */
+  kindCounts: Partial<Record<ActivityKind, number>>;
+  kinds: ActivityKind[];
+  pagination: Pagination;
+}
+
 export interface PokemonProfileResponse {
   pokemon: PokemonDetail;
   notes: Note[];

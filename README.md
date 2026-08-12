@@ -4,10 +4,12 @@ A CRM-style tool for looking up Pokémon, tracking notes, and viewing performanc
 stats — a personal learning sandbox modelled after the patterns used in student
 advising tools.
 
+- **Home** — landing page with live workspace counters and links into every section
 - **Pokémon Lookup** — searchable, filterable, sortable table of all 1,025 Pokémon
-- **Pokémon Profile** — full detail view with base-stat chart, notes, and status flags
+- **Pokémon Profile** — base-stat chart, notes, an interactive activity log, and a quick-search to jump between Pokémon
 - **Performance Dashboard** — EDA charts across the dataset (distributions, type and generation breakdowns, correlations)
 - **Notes** — cross-Pokémon note feed, sortable and filterable
+- **Activity** — every status flag as one interactive, filterable table
 - **Tableau Dashboard** — an embedded Tableau Public workbook alongside the in-app analytics
 
 Vite + React + TypeScript + Tailwind on the front, Express + Drizzle + PostgreSQL
