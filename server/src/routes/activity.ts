@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { activity, pokemon } from '../db/schema.js';
+import { activity, pokemon, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound } from '../http.js';
 import { DEFAULT_OWNER } from '../constants.js';
 
@@ -25,6 +25,8 @@ const listQuerySchema = z.object({
   kind: kindSchema.optional(),
   owner: z.string().trim().max(200).optional(),
   pokemonId: z.coerce.number().int().min(1).optional(),
+  /** Scope to flags on Pokémon in a given trainer's roster. */
+  trainerId: z.coerce.number().int().min(1).optional(),
   sort: z.enum(Object.keys(SORTABLE) as [keyof typeof SORTABLE]).default('updatedAt'),
   direction: z.enum(['asc', 'desc']).default('desc'),
   page: z.coerce.number().int().min(1).default(1),
@@ -49,12 +51,19 @@ activityRouter.get(
     if (query.kind) filters.push(eq(activity.kind, query.kind));
     if (query.owner) filters.push(eq(activity.owner, query.owner));
     if (query.pokemonId !== undefined) filters.push(eq(activity.pokemonId, query.pokemonId));
+    if (query.trainerId !== undefined) {
+      // `roster` has its own pokemon_id, so the outer reference MUST be
+      // qualified — see CLAUDE.md § correlated subqueries.
+      filters.push(
+        sql`exists (select 1 from ${roster} r where r.pokemon_id = ${activity}.pokemon_id and r.trainer_id = ${query.trainerId})`,
+      );
+    }
 
     const where = filters.length ? and(...filters) : undefined;
     const orderColumn = SORTABLE[query.sort];
     const orderBy = query.direction === 'desc' ? desc(orderColumn) : asc(orderColumn);
 
-    const [rows, [totals], owners, kindCounts] = await Promise.all([
+    const [rows, [totals], owners, kindCounts, trainerOptions] = await Promise.all([
       db
         .select({
           id: activity.id,
@@ -86,11 +95,13 @@ activityRouter.get(
         .select({ kind: activity.kind, count: sql<number>`count(*)::int` })
         .from(activity)
         .groupBy(activity.kind),
+      db.select({ id: trainers.id, name: trainers.name }).from(trainers).orderBy(asc(trainers.name)),
     ]);
 
     res.json({
       data: rows,
       owners: owners.map((o) => o.owner),
+      trainers: trainerOptions,
       kindCounts: Object.fromEntries(kindCounts.map((k) => [k.kind, k.count])),
       kinds: activity.kind.enumValues,
       pagination: {

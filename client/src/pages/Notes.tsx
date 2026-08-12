@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { toQueryString } from '../lib/api';
 import { useApi, useDebounced } from '../lib/useApi';
 import type { NotesResponse } from '../lib/types';
@@ -25,8 +25,12 @@ const SORT_OPTIONS = [
 ] as const;
 
 export function NotesPage() {
+  // Seeded from ?trainerId= so the trainer dashboard can link straight to a
+  // roster-scoped note feed.
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [owner, setOwner] = useState('');
+  const [trainerId, setTrainerId] = useState(() => searchParams.get('trainerId') ?? '');
   const [sort, setSort] = useState<string>('createdAt');
   const [direction, setDirection] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
@@ -38,16 +42,17 @@ export function NotesPage() {
       `/api/notes${toQueryString({
         search: debouncedSearch,
         owner,
+        trainerId,
         sort,
         direction,
         page,
         pageSize: 20,
       })}`,
-    [debouncedSearch, owner, sort, direction, page],
+    [debouncedSearch, owner, trainerId, sort, direction, page],
   );
 
   const { data, loading, error, refetch } = useApi<NotesResponse>(path);
-  const hasFilters = Boolean(search || owner);
+  const hasFilters = Boolean(search || owner || trainerId);
 
   return (
     <div className="mx-auto max-w-[1100px] px-8 py-7">
@@ -85,6 +90,22 @@ export function NotesPage() {
           ))}
         </Select>
 
+        <Select
+          value={trainerId}
+          onChange={(e) => {
+            setTrainerId(e.target.value);
+            setPage(1);
+          }}
+          aria-label="Filter by trainer"
+        >
+          <option value="">All trainers</option>
+          {data?.trainers.map((trainer) => (
+            <option key={trainer.id} value={trainer.id}>
+              {trainer.name}
+            </option>
+          ))}
+        </Select>
+
         <Select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort notes by">
           {SORT_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -102,6 +123,7 @@ export function NotesPage() {
             onClick={() => {
               setSearch('');
               setOwner('');
+              setTrainerId('');
               setPage(1);
             }}
           >

@@ -591,8 +591,11 @@ function TrainerDashboard({
         title="Note history"
         subtitle="Notes on any Pokémon in this roster"
         actions={
-          <Link to="/notes" className="text-xs font-medium text-brand hover:underline">
-            All notes →
+          <Link
+            to={`/notes${toQueryString({ trainerId: trainer.id })}`}
+            className="text-xs font-medium text-brand hover:underline"
+          >
+            All notes for this roster →
           </Link>
         }
       >
@@ -652,8 +655,11 @@ function TrainerDashboard({
         title="Activity history"
         subtitle="Status flags on any Pokémon in this roster"
         actions={
-          <Link to="/activity" className="text-xs font-medium text-brand hover:underline">
-            All activity →
+          <Link
+            to={`/activity${toQueryString({ trainerId: trainer.id })}`}
+            className="text-xs font-medium text-brand hover:underline"
+          >
+            All activity for this roster →
           </Link>
         }
       >

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, toQueryString } from '../lib/api';
 import { useApi, useDebounced } from '../lib/useApi';
 import type { ActivityKind, ActivityListResponse } from '../lib/types';
@@ -30,9 +30,13 @@ const COLUMNS = [
 ] as const;
 
 export function ActivityPage() {
+  // Seeded from ?trainerId= so the trainer dashboard can link straight to a
+  // roster-scoped activity feed.
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState('');
   const [owner, setOwner] = useState('');
+  const [trainerId, setTrainerId] = useState(() => searchParams.get('trainerId') ?? '');
   const [sort, setSort] = useState('updatedAt');
   const [direction, setDirection] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
@@ -47,16 +51,17 @@ export function ActivityPage() {
         search: debouncedSearch,
         kind,
         owner,
+        trainerId,
         sort,
         direction,
         page,
         pageSize: 25,
       })}`,
-    [debouncedSearch, kind, owner, sort, direction, page],
+    [debouncedSearch, kind, owner, trainerId, sort, direction, page],
   );
 
   const { data, loading, error, refetch } = useApi<ActivityListResponse>(path);
-  const hasFilters = Boolean(search || kind || owner);
+  const hasFilters = Boolean(search || kind || owner || trainerId);
 
   function toggleSort(key: string) {
     if (sort === key) {
@@ -147,12 +152,29 @@ export function ActivityPage() {
           ))}
         </Select>
 
+        <Select
+          value={trainerId}
+          onChange={(e) => {
+            setTrainerId(e.target.value);
+            setPage(1);
+          }}
+          aria-label="Filter by trainer"
+        >
+          <option value="">All trainers</option>
+          {(data?.trainers ?? []).map((trainer) => (
+            <option key={trainer.id} value={trainer.id}>
+              {trainer.name}
+            </option>
+          ))}
+        </Select>
+
         {hasFilters && (
           <Button
             onClick={() => {
               setSearch('');
               setKind('');
               setOwner('');
+              setTrainerId('');
               setPage(1);
             }}
           >

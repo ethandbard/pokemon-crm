@@ -95,8 +95,8 @@ pokemon-crm/
 | `/trainers` | Trainers — `?trainerId=` selects a trainer and opens their dashboard |
 | `/pokemon/:id` | Pokémon Profile |
 | `/dashboard` | Performance Dashboard |
-| `/notes` | Notes |
-| `/activity` | Activity — reads `?pokemonId=` to scope to one Pokémon |
+| `/notes` | Notes — reads `?trainerId=` to scope to one roster |
+| `/activity` | Activity — reads `?trainerId=` to scope to one roster |
 | `/tableau` | Tableau Dashboard |
 
 Anything unmatched redirects to `/`. **`/` is the landing page, not the
@@ -201,11 +201,11 @@ All routes are under `/api`. Responses are JSON; errors are
 | POST | `/api/trainers/:id/roster` | Add a Pokémon to that trainer's roster |
 | PATCH | `/api/roster/:id` | Update nickname/level/status, or move the entry to another trainer |
 | DELETE | `/api/roster/:id` | Remove a roster entry |
-| GET | `/api/notes` | Cross-Pokémon feed — `search`, `pokemonId`, `owner`, `sort`, `direction`, pagination |
+| GET | `/api/notes` | Cross-Pokémon feed — `search`, `pokemonId`, `owner`, `trainerId`, `sort`, `direction`, pagination. Also returns `owners` and `trainers` for the filter dropdowns |
 | POST | `/api/notes` | Create |
 | PATCH | `/api/notes/:id` | Update body |
 | DELETE | `/api/notes/:id` | Delete |
-| GET | `/api/activity` | Status flags joined to their Pokémon — `search`, `kind`, `owner`, `pokemonId`, `sort`, `direction`, pagination. Also returns `owners`, `kinds`, and unfiltered `kindCounts` |
+| GET | `/api/activity` | Status flags joined to their Pokémon — `search`, `kind`, `owner`, `pokemonId`, `trainerId`, `sort`, `direction`, pagination. Also returns `owners`, `trainers`, `kinds`, and unfiltered `kindCounts` |
 | POST | `/api/activity/toggle` | Toggle a flag on/off |
 | DELETE | `/api/activity/:id` | Remove one flag row |
 | GET | `/api/stats/dashboard` | Every dashboard aggregation in one round trip — `bucketSize` |
@@ -323,6 +323,13 @@ Charts follow a fixed set of rules — match them when adding one:
   first, each removable. Removing a log entry *is* clearing the flag; there's no
   separate audit table, so don't present it as one.
 - **Activity page** — every row across all Pokémon, filterable and sortable.
+
+**Filtering notes or activity by trainer** goes through `roster`: it matches
+rows whose Pokémon sits on that trainer's roster. There is no `trainer_id` on
+`notes` or `activity`, so the filter is an `exists` against `roster` — and
+because `roster` has its own `pokemon_id`, the outer reference must be
+qualified (`${notes}.pokemon_id`). Unqualified, it compares `roster` to itself
+and matches everything.
 
 The Activity page's summary tiles use the API's **unfiltered** `kindCounts`, so
 they stay put while you filter the table underneath them.

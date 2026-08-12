@@ -192,6 +192,7 @@ export interface ActivityWithPokemon extends ActivityRecord {
 export interface ActivityListResponse {
   data: ActivityWithPokemon[];
   owners: string[];
+  trainers: { id: number; name: string }[];
   /** Unfiltered totals per kind, so summary tiles don't move when filtering. */
   kindCounts: Partial<Record<ActivityKind, number>>;
   kinds: ActivityKind[];
@@ -229,6 +230,7 @@ export interface PokemonProfileResponse {
 export interface NotesResponse {
   data: NoteWithPokemon[];
   owners: string[];
+  trainers: { id: number; name: string }[];
   pagination: Pagination;
 }
 

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { notes, pokemon } from '../db/schema.js';
+import { notes, pokemon, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound } from '../http.js';
 import { DEFAULT_OWNER } from '../constants.js';
 
@@ -19,6 +19,8 @@ const listQuerySchema = z.object({
   search: z.string().trim().max(200).optional(),
   pokemonId: z.coerce.number().int().min(1).optional(),
   owner: z.string().trim().max(200).optional(),
+  /** Scope to notes on Pokémon in a given trainer's roster. */
+  trainerId: z.coerce.number().int().min(1).optional(),
   sort: z.enum(Object.keys(SORTABLE) as [keyof typeof SORTABLE]).default('createdAt'),
   direction: z.enum(['asc', 'desc']).default('desc'),
   page: z.coerce.number().int().min(1).default(1),
@@ -35,12 +37,19 @@ notesRouter.get(
     if (query.search) filters.push(ilike(notes.body, `%${query.search}%`));
     if (query.pokemonId !== undefined) filters.push(eq(notes.pokemonId, query.pokemonId));
     if (query.owner) filters.push(eq(notes.owner, query.owner));
+    if (query.trainerId !== undefined) {
+      // `roster` has its own pokemon_id, so the outer reference MUST be
+      // qualified — see CLAUDE.md § correlated subqueries.
+      filters.push(
+        sql`exists (select 1 from ${roster} r where r.pokemon_id = ${notes}.pokemon_id and r.trainer_id = ${query.trainerId})`,
+      );
+    }
 
     const where = filters.length ? and(...filters) : undefined;
     const orderColumn = SORTABLE[query.sort];
     const orderBy = query.direction === 'desc' ? desc(orderColumn) : asc(orderColumn);
 
-    const [rows, [totals], owners] = await Promise.all([
+    const [rows, [totals], owners, trainerOptions] = await Promise.all([
       db
         .select({
           id: notes.id,
@@ -66,11 +75,13 @@ notesRouter.get(
         .innerJoin(pokemon, eq(notes.pokemonId, pokemon.id))
         .where(where),
       db.selectDistinct({ owner: notes.owner }).from(notes).orderBy(asc(notes.owner)),
+      db.select({ id: trainers.id, name: trainers.name }).from(trainers).orderBy(asc(trainers.name)),
     ]);
 
     res.json({
       data: rows,
       owners: owners.map((o) => o.owner),
+      trainers: trainerOptions,
       pagination: {
         page: query.page,
         pageSize: query.pageSize,
