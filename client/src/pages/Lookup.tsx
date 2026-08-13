@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toQueryString } from '../lib/api';
-import { useApi, useDebounced } from '../lib/useApi';
-import type { FilterOptions, PokemonListResponse } from '../lib/types';
+import { useApi, useDebounced, usePageClamp } from '../lib/useApi';
+import type { FilterOptions, MoveDetailResponse, PokemonListResponse } from '../lib/types';
 import {
   Button,
   EmptyState,
@@ -13,7 +13,7 @@ import {
   TextInput,
   TypeBadge,
 } from '../components/ui';
-import { ACTIVITY_META, dexNumber, titleCase } from '../lib/format';
+import { ACTIVITY_META, dexNumber, slugLabel, titleCase } from '../lib/format';
 import { PageHeader } from '../components/PageHeader';
 import { BulkActionBar } from '../components/BulkActionBar';
 import { SavedViews } from '../components/SavedViews';
@@ -30,8 +30,19 @@ const COLUMNS = [
   { key: 'specialDefense', label: 'SpD', numeric: true },
   { key: 'speed', label: 'Spe', numeric: true },
   { key: 'baseStatTotal', label: 'BST', numeric: true },
+  { key: null, label: 'Moves', numeric: true },
   { key: null, label: 'Trainers', numeric: false },
   { key: null, label: 'CRM', numeric: false },
+] as const;
+
+/** Values match the `evYield` enum on GET /api/pokemon. */
+const EV_YIELD_OPTIONS = [
+  { value: 'hp', label: 'HP' },
+  { value: 'attack', label: 'Attack' },
+  { value: 'defense', label: 'Defense' },
+  { value: 'specialAttack', label: 'Sp. Atk' },
+  { value: 'specialDefense', label: 'Sp. Def' },
+  { value: 'speed', label: 'Speed' },
 ] as const;
 
 export function LookupPage() {
@@ -43,6 +54,23 @@ export function LookupPage() {
   const [generation, setGeneration] = useState('');
   const [activity, setActivity] = useState('');
   const [trainerId, setTrainerId] = useState(() => searchParams.get('trainerId') ?? '');
+  // Species dimensions from the PokeAPI species endpoint. Kept behind a
+  // disclosure: nine selects in one row is unreadable, and these are the
+  // narrower questions you reach for after the primary five.
+  // Set by the Moves page ("open the learners in Lookup"), never by a control
+  // here — a select of 797 moves isn't a filter anyone can use. It renders as a
+  // removable chip so it can't silently narrow the table.
+  const [moveId, setMoveId] = useState(() => searchParams.get('moveId') ?? '');
+  const [learnMethod, setLearnMethod] = useState(() => searchParams.get('learnMethod') ?? '');
+  const [region, setRegion] = useState('');
+  const [habitat, setHabitat] = useState('');
+  const [shape, setShape] = useState('');
+  const [eggGroup, setEggGroup] = useState('');
+  const [growthRate, setGrowthRate] = useState('');
+  const [evYield, setEvYield] = useState('');
+  const [baby, setBaby] = useState('');
+  const [showMore, setShowMore] = useState(false);
+
   const [sort, setSort] = useState('id');
   const [direction, setDirection] = useState<'asc' | 'desc'>('asc');
   const [page, setPage] = useState(1);
@@ -51,7 +79,22 @@ export function LookupPage() {
   const debouncedSearch = useDebounced(search);
 
   /** Filter values a saved view captures and restores. */
-  const viewState = { search, type, generation, activity, trainerId, sort, direction };
+  const viewState = {
+    search,
+    type,
+    generation,
+    activity,
+    trainerId,
+    region,
+    habitat,
+    shape,
+    eggGroup,
+    growthRate,
+    evYield,
+    baby,
+    sort,
+    direction,
+  };
 
   function applyView(state: Record<string, string | number | undefined>) {
     setSearch(String(state.search ?? ''));
@@ -59,9 +102,21 @@ export function LookupPage() {
     setGeneration(String(state.generation ?? ''));
     setActivity(String(state.activity ?? ''));
     setTrainerId(String(state.trainerId ?? ''));
+    setRegion(String(state.region ?? ''));
+    setHabitat(String(state.habitat ?? ''));
+    setShape(String(state.shape ?? ''));
+    setEggGroup(String(state.eggGroup ?? ''));
+    setGrowthRate(String(state.growthRate ?? ''));
+    setEvYield(String(state.evYield ?? ''));
+    setBaby(String(state.baby ?? ''));
     setSort(String(state.sort ?? 'id'));
     setDirection(state.direction === 'desc' ? 'desc' : 'asc');
     setPage(1);
+    // A saved view carrying species filters must not restore them into a
+    // collapsed panel, or the row count won't match the visible controls.
+    if (state.region || state.habitat || state.shape || state.eggGroup || state.growthRate || state.evYield || state.baby) {
+      setShowMore(true);
+    }
   }
 
   const listPath = useMemo(
@@ -72,16 +127,50 @@ export function LookupPage() {
         generation,
         activity,
         trainerId,
+        moveId,
+        learnMethod,
+        region,
+        habitat,
+        shape,
+        eggGroup,
+        growthRate,
+        evYield,
+        baby,
         sort,
         direction,
         page,
         pageSize: 25,
       })}`,
-    [debouncedSearch, type, generation, activity, trainerId, sort, direction, page],
+    [
+      debouncedSearch,
+      type,
+      generation,
+      activity,
+      trainerId,
+      moveId,
+      learnMethod,
+      region,
+      habitat,
+      shape,
+      eggGroup,
+      growthRate,
+      evYield,
+      baby,
+      sort,
+      direction,
+      page,
+    ],
   );
 
   const { data, loading, error, refetch } = useApi<PokemonListResponse>(listPath);
   const filters = useApi<FilterOptions>('/api/pokemon/filters');
+  // Null path skips the fetch entirely when no move filter is set — see
+  // CLAUDE.md § frontend conventions.
+  const activeMove = useApi<MoveDetailResponse>(
+    moveId ? `/api/moves/${moveId}?pageSize=1` : null,
+  );
+
+  usePageClamp(data?.pagination, setPage);
 
   /** Clicking a header sorts by it; clicking the active header flips direction. */
   function toggleSort(key: string) {
@@ -131,7 +220,30 @@ export function LookupPage() {
     });
   }
 
-  const hasFilters = Boolean(search || type || generation || activity || trainerId);
+  const speciesFilterCount = [region, habitat, shape, eggGroup, growthRate, evYield, baby].filter(
+    Boolean,
+  ).length;
+  const hasFilters = Boolean(
+    search || type || generation || activity || trainerId || moveId || speciesFilterCount,
+  );
+
+  function clearFilters() {
+    setSearch('');
+    setType('');
+    setGeneration('');
+    setActivity('');
+    setTrainerId('');
+    setMoveId('');
+    setLearnMethod('');
+    setRegion('');
+    setHabitat('');
+    setShape('');
+    setEggGroup('');
+    setGrowthRate('');
+    setEvYield('');
+    setBaby('');
+    setPage(1);
+  }
 
   return (
     <div className="mx-auto max-w-[1400px] px-8 py-7">
@@ -202,20 +314,16 @@ export function LookupPage() {
           ))}
         </Select>
 
-        {hasFilters && (
-          <Button
-            onClick={() => {
-              setSearch('');
-              setType('');
-              setGeneration('');
-              setActivity('');
-              setTrainerId('');
-              setPage(1);
-            }}
-          >
-            Clear filters
-          </Button>
-        )}
+        <Button
+          onClick={() => setShowMore((open) => !open)}
+          aria-expanded={showMore}
+          title="Region, habitat, egg group, shape, growth rate, EV yield"
+        >
+          {showMore ? 'Fewer filters' : 'More filters'}
+          {speciesFilterCount > 0 && !showMore && ` (${speciesFilterCount})`}
+        </Button>
+
+        {hasFilters && <Button onClick={clearFilters}>Clear filters</Button>}
 
         <span className="ml-auto flex gap-2">
           <SavedViews
@@ -226,6 +334,136 @@ export function LookupPage() {
           />
         </span>
       </div>
+
+      {/* The move filter has no control of its own — it arrives by link, so it
+          needs to announce itself and be removable in one click. */}
+      {moveId && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-full border border-brand bg-brand/10 px-3 py-1 text-xs font-medium text-brand-strong">
+            Learns{' '}
+            <Link to={`/moves/${moveId}`} className="underline underline-offset-2">
+              {activeMove.data?.move.displayName ?? `move #${moveId}`}
+            </Link>
+            {learnMethod && ` by ${slugLabel(learnMethod)}`}
+            <button
+              type="button"
+              onClick={() => {
+                setMoveId('');
+                setLearnMethod('');
+                setPage(1);
+              }}
+              aria-label="Remove the move filter"
+              className="ml-0.5 text-sm leading-none hover:text-ink"
+            >
+              ×
+            </button>
+          </span>
+          {activeMove.data && (
+            <span className="text-xs text-muted">
+              {activeMove.data.move.learnedByCount.toLocaleString()} species learn it dex-wide
+            </span>
+          )}
+        </div>
+      )}
+
+      {showMore && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-hairline bg-plane p-3">
+          <Select
+            value={region}
+            onChange={(e) => withReset(setRegion)(e.target.value)}
+            aria-label="Filter by region"
+          >
+            <option value="">All regions</option>
+            {filters.data?.regions.map((r) => (
+              <option key={r} value={r}>
+                {r} dex
+              </option>
+            ))}
+          </Select>
+
+          <Select
+            value={habitat}
+            onChange={(e) => withReset(setHabitat)(e.target.value)}
+            aria-label="Filter by habitat"
+          >
+            <option value="">Any habitat</option>
+            {filters.data?.habitats.map((h) => (
+              <option key={h} value={h}>
+                {slugLabel(h)}
+              </option>
+            ))}
+          </Select>
+
+          <Select
+            value={eggGroup}
+            onChange={(e) => withReset(setEggGroup)(e.target.value)}
+            aria-label="Filter by egg group"
+          >
+            <option value="">Any egg group</option>
+            {filters.data?.eggGroups.map((g) => (
+              <option key={g} value={g}>
+                {slugLabel(g)}
+              </option>
+            ))}
+          </Select>
+
+          <Select
+            value={shape}
+            onChange={(e) => withReset(setShape)(e.target.value)}
+            aria-label="Filter by shape"
+          >
+            <option value="">Any shape</option>
+            {filters.data?.shapes.map((s) => (
+              <option key={s} value={s}>
+                {slugLabel(s)}
+              </option>
+            ))}
+          </Select>
+
+          <Select
+            value={growthRate}
+            onChange={(e) => withReset(setGrowthRate)(e.target.value)}
+            aria-label="Filter by growth rate"
+          >
+            <option value="">Any growth rate</option>
+            {filters.data?.growthRates.map((g) => (
+              <option key={g} value={g}>
+                {slugLabel(g)}
+              </option>
+            ))}
+          </Select>
+
+          <Select
+            value={evYield}
+            onChange={(e) => withReset(setEvYield)(e.target.value)}
+            aria-label="Filter by EV yield"
+          >
+            <option value="">Any EV yield</option>
+            {EV_YIELD_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                Trains {option.label}
+              </option>
+            ))}
+          </Select>
+
+          <Select
+            value={baby}
+            onChange={(e) => withReset(setBaby)(e.target.value)}
+            aria-label="Filter by baby species"
+          >
+            <option value="">Baby or not</option>
+            <option value="true">Baby only</option>
+            <option value="false">Exclude babies</option>
+          </Select>
+
+          {/* Stated rather than left to be discovered from an empty table:
+              PokeAPI only assigns habitats to generations 1–3. */}
+          <p className="basis-full text-xs text-muted">
+            Habitat is only recorded for generations 1–3 in PokeAPI, so filtering by it excludes
+            later generations entirely.
+          </p>
+        </div>
+      )}
 
       <div className="overflow-hidden rounded-xl border border-hairline bg-surface">
         {loading && !data ? (
@@ -355,6 +593,9 @@ export function LookupPage() {
                       <td className="px-3 py-2 text-right font-medium tabular-nums">
                         {row.baseStatTotal}
                       </td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted">
+                        {row.moveCount}
+                      </td>
                       <td className="px-3 py-2">
                         {row.trainerNames.length === 0 ? (
                           <span className="text-xs text-muted">—</span>
@@ -392,10 +633,10 @@ export function LookupPage() {
             </div>
 
             <Paginator
-              page={data.pagination.page}
-              totalPages={data.pagination.totalPages}
-              total={data.pagination.total}
+              pagination={data.pagination}
               onChange={setPage}
+              label="Pokémon"
+              labelPlural="Pokémon"
             />
           </>
         )}

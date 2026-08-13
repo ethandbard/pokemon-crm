@@ -2,8 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { activity, notes, pokemon, roster, trainers } from '../db/schema.js';
-import { asyncHandler, badRequest, notFound } from '../http.js';
+import { activity, moves, notes, pokemon, pokemonMoves, roster, trainers } from '../db/schema.js';
+import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
+import { POKEMON_TYPES } from '../constants.js';
 
 export const trainersRouter = Router();
 
@@ -239,21 +240,52 @@ trainersRouter.post(
 );
 
 /**
+ * The note and activity histories are paginated independently of each other,
+ * so paging through notes doesn't reset the activity card underneath it. Both
+ * used to be a bare `limit 50` with no total, which truncated a busy roster
+ * silently — the card said "Note history" and showed 50 of 200 with nothing to
+ * say so.
+ */
+const dashboardQuerySchema = z.object({
+  notesPage: z.coerce.number().int().min(1).default(1),
+  activityPage: z.coerce.number().int().min(1).default(1),
+  historyPageSize: z.coerce.number().int().min(1).max(100).default(10),
+});
+
+/** The 18 types as a jsonb array, for the coverage gap report below. */
+const ALL_TYPES_JSON = JSON.stringify(POKEMON_TYPES);
+
+/**
  * GET /api/trainers/:id — the trainer dashboard payload.
  *
- * Bundles the roster, aggregate stats, and the note/activity history for every
- * Pokémon on that roster, so the page renders from one round trip.
+ * Bundles the roster, aggregate stats, movepool coverage, and a page of the
+ * note/activity history for every Pokémon on that roster, so the page renders
+ * from one round trip.
  */
 trainersRouter.get(
   '/:id',
   asyncHandler(async (req, res) => {
     const { id } = idParamSchema.parse(req.params);
+    const query = dashboardQuerySchema.parse(req.query);
 
     const [trainer] = await db.select().from(trainers).where(eq(trainers.id, id)).limit(1);
     if (!trainer) throw notFound(`No trainer with id ${id}`);
 
-    const [rosterRows, summary, typeBreakdown, statAverages, trainerNotes, trainerActivity] =
-      await Promise.all([
+    const notesOffset = (query.notesPage - 1) * query.historyPageSize;
+    const activityOffset = (query.activityPage - 1) * query.historyPageSize;
+
+    const [
+      rosterRows,
+      summary,
+      typeBreakdown,
+      statAverages,
+      trainerNotes,
+      trainerActivity,
+      [noteTotals],
+      [activityTotals],
+      moveCoverage,
+      movepoolSummary,
+    ] = await Promise.all([
         db
           .select({
             id: roster.id,
@@ -287,10 +319,12 @@ trainersRouter.get(
               display_name: string;
               evolution_min_level: number | null;
               evolution_trigger: string | null;
+              evolution_condition: string | null;
               sprite_url: string | null;
             } | null>`(
               select to_jsonb(x) from (
-                select n.id, n.display_name, n.evolution_min_level, n.evolution_trigger, n.sprite_url
+                select n.id, n.display_name, n.evolution_min_level, n.evolution_trigger,
+                       n.evolution_condition, n.sprite_url
                 from ${pokemon} n
                 where n.evolves_from_id = ${roster}.pokemon_id
                 order by n.evolution_min_level nulls last, n.id
@@ -311,6 +345,18 @@ trainersRouter.get(
                   and n.evolution_min_level is not null
                   and ${roster}.level >= n.evolution_min_level
               )
+            )`,
+            /*
+             * Movepool figures per member — "coursework taken" and "how many
+             * types it can actually attack with". Both count DISTINCT moves,
+             * since a move learnable by both level-up and TM is one move.
+             */
+            moveCount: sql<number>`(select count(distinct pm.move_id)::int from ${pokemonMoves} pm where pm.pokemon_id = ${roster}.pokemon_id)`,
+            coverageCount: sql<number>`(
+              select count(distinct m.type)::int
+              from ${pokemonMoves} pm
+              join ${moves} m on m.id = pm.move_id
+              where pm.pokemon_id = ${roster}.pokemon_id and m.damage_class <> 'status'
             )`,
             noteCount: sql<number>`(select count(*)::int from ${notes} n where n.pokemon_id = ${roster}.pokemon_id)`,
             activityKinds: sql<
@@ -412,8 +458,11 @@ trainersRouter.get(
           .from(notes)
           .innerJoin(roster, and(eq(roster.pokemonId, notes.pokemonId), eq(roster.trainerId, id)))
           .innerJoin(pokemon, eq(notes.pokemonId, pokemon.id))
-          .orderBy(desc(notes.createdAt))
-          .limit(50),
+          // Tiebreaker on id: two notes written in the same second would
+          // otherwise be free to swap places between pages.
+          .orderBy(desc(notes.createdAt), desc(notes.id))
+          .limit(query.historyPageSize)
+          .offset(notesOffset),
 
         db
           .select({
@@ -430,8 +479,90 @@ trainersRouter.get(
           .from(activity)
           .innerJoin(roster, and(eq(roster.pokemonId, activity.pokemonId), eq(roster.trainerId, id)))
           .innerJoin(pokemon, eq(activity.pokemonId, pokemon.id))
-          .orderBy(desc(activity.updatedAt))
-          .limit(50),
+          .orderBy(desc(activity.updatedAt), desc(activity.id))
+          .limit(query.historyPageSize)
+          .offset(activityOffset),
+
+        // Totals for the two histories above — what "showing 10 of 63" needs.
+        db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(notes)
+          .innerJoin(roster, and(eq(roster.pokemonId, notes.pokemonId), eq(roster.trainerId, id))),
+        db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(activity)
+          .innerJoin(roster, and(eq(roster.pokemonId, activity.pokemonId), eq(roster.trainerId, id))),
+
+        /*
+         * Movepool coverage — the gap report.
+         *
+         * The type breakdown above answers "what types is this roster made of";
+         * this answers "what types can it hit", which is the advising analogue
+         * that was actually missing. All 18 types are listed, including the
+         * ones at zero, because the zeroes ARE the finding — a chart of only
+         * what's covered can't show a hole.
+         *
+         * Status moves are excluded: a Grass-type status move gives no Grass
+         * coverage, and counting it would report a gap as filled.
+         */
+        db.execute<{ type: string; members: number; moves: number }>(sql`
+          with all_types as (
+            select jsonb_array_elements_text(${ALL_TYPES_JSON}::jsonb) as type
+          ),
+          covered as (
+            select
+              m.type                              as type,
+              count(distinct r.pokemon_id)::int   as members,
+              count(distinct m.id)::int           as moves
+            from ${roster} r
+            join ${pokemonMoves} pm on pm.pokemon_id = r.pokemon_id
+            join ${moves} m on m.id = pm.move_id
+            where r.trainer_id = ${id}
+              and r.status <> 'retired'
+              and m.damage_class <> 'status'
+            group by m.type
+          )
+          select
+            all_types.type                        as type,
+            coalesce(covered.members, 0)::int     as members,
+            coalesce(covered.moves, 0)::int       as moves
+          from all_types
+          left join covered on covered.type = all_types.type
+          order by members desc, type asc
+        `),
+
+        // Active roster only, matching every other figure on this dashboard.
+        db.execute<{
+          distinct_moves: number;
+          avg_movepool: number;
+          types_covered: number;
+          thinnest_movepool: number | null;
+        }>(sql`
+          with member_moves as (
+            select r.pokemon_id, count(distinct pm.move_id)::int as move_count
+            from ${roster} r
+            left join ${pokemonMoves} pm on pm.pokemon_id = r.pokemon_id
+            where r.trainer_id = ${id} and r.status <> 'retired'
+            group by r.pokemon_id
+          )
+          select
+            (
+              select count(distinct pm.move_id)::int
+              from ${roster} r
+              join ${pokemonMoves} pm on pm.pokemon_id = r.pokemon_id
+              where r.trainer_id = ${id} and r.status <> 'retired'
+            )                                                        as distinct_moves,
+            coalesce(round(avg(move_count))::int, 0)                 as avg_movepool,
+            (
+              select count(distinct m.type)::int
+              from ${roster} r
+              join ${pokemonMoves} pm on pm.pokemon_id = r.pokemon_id
+              join ${moves} m on m.id = pm.move_id
+              where r.trainer_id = ${id} and r.status <> 'retired' and m.damage_class <> 'status'
+            )                                                        as types_covered,
+            min(move_count)::int                                     as thinnest_movepool
+          from member_moves
+        `),
       ]);
 
     res.json({
@@ -440,8 +571,16 @@ trainersRouter.get(
       summary: summary.rows[0] ?? null,
       typeBreakdown: typeBreakdown.rows,
       statAverages: statAverages.rows,
+      moveCoverage: moveCoverage.rows,
+      movepool: movepoolSummary.rows[0] ?? null,
       notes: trainerNotes,
       activity: trainerActivity,
+      notesPagination: paginationFor(query.notesPage, query.historyPageSize, noteTotals?.count ?? 0),
+      activityPagination: paginationFor(
+        query.activityPage,
+        query.historyPageSize,
+        activityTotals?.count ?? 0,
+      ),
     });
   }),
 );

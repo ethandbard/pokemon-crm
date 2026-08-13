@@ -77,6 +77,43 @@ export const ROSTER_STATUS_META: Record<
   },
 };
 
+/**
+ * How a move is learned. Labels are the games' own wording — `machine` is a TM,
+ * which is what anyone reading the movepool expects to see.
+ */
+export const LEARN_METHOD_META: Record<string, { label: string; hint: string }> = {
+  'level-up': { label: 'Level up', hint: 'Learned at a level, like coursework by term' },
+  machine: { label: 'TM / TR', hint: 'Taught from a technical machine' },
+  egg: { label: 'Egg', hint: 'Inherited from a parent' },
+  tutor: { label: 'Tutor', hint: 'Taught by a move tutor' },
+  train: { label: 'Training', hint: 'Learned through training (Legends-style games)' },
+};
+
+export function learnMethodLabel(method: string): string {
+  return LEARN_METHOD_META[method]?.label ?? slugLabel(method);
+}
+
+/** Order the movepool tabs appear in — commonest routes first, rest appended. */
+export const LEARN_METHOD_ORDER = ['level-up', 'machine', 'egg', 'tutor', 'train'];
+
+/**
+ * Null power/accuracy are meaningful: a status move has no power, and a move
+ * that never misses has no accuracy. Rendering either as 0 would say the
+ * opposite of what's true.
+ */
+export function moveStat(value: number | null): string {
+  return value === null ? '—' : String(value);
+}
+
+/**
+ * Power specifically. PokeAPI reports **0** as well as null for "no fixed base
+ * power" — status moves and fixed-damage ones like Seismic Toss — and 0 never
+ * means "deals zero damage", so both render as "—".
+ */
+export function movePower(power: number | null): string {
+  return power === null || power === 0 ? '—' : String(power);
+}
+
 export function titleCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -100,4 +137,30 @@ export function formatDate(iso: string): string {
 
 export function dexNumber(id: number): string {
   return `#${String(id).padStart(4, '0')}`;
+}
+
+/**
+ * `rough-terrain` → `Rough terrain`. For the PokeAPI slugs now stored on the
+ * Pokémon record — habitat, shape, egg groups, growth rate, held items.
+ *
+ * Note this differs from `titleCase` above, which only touches the first
+ * character and leaves the hyphens in place.
+ */
+export function slugLabel(slug: string): string {
+  const spaced = slug.replace(/-/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/**
+ * PokeAPI's `gender_rate` is **eighths female**, with -1 meaning genderless —
+ * so 1 is 12.5% female, not "1 female". Reading it as a plain number is wrong
+ * in both directions, which is why this never renders the raw value.
+ */
+export function formatGenderRate(rate: number | null): string {
+  if (rate === null) return '—';
+  if (rate < 0) return 'Genderless';
+  if (rate === 0) return 'Always male';
+  if (rate === 8) return 'Always female';
+  const female = (rate / 8) * 100;
+  return `${(100 - female).toFixed(1)}% ♂ / ${female.toFixed(1)}% ♀`;
 }

@@ -45,6 +45,15 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    to: '/moves',
+    label: 'Moves',
+    icon: icon(
+      <>
+        <path d="M13 3 5 13h6l-2 8 8-10h-6z" />
+      </>,
+    ),
+  },
+  {
     to: '/trainers',
     label: 'Trainers',
     icon: icon(

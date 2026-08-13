@@ -46,4 +46,11 @@ export const env = {
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   seedLimit: int('SEED_LIMIT', 1025),
   seedConcurrency: int('SEED_CONCURRENCY', 8),
+  /**
+   * Whether the seed imports moves. The species→move join rows are free (they
+   * come with the `/pokemon` response), but the move details are one request
+   * per distinct move — ~900 for the full dex. Set SEED_MOVES=false for a
+   * faster run; the moves pages then render their empty states.
+   */
+  seedMoves: (process.env.SEED_MOVES ?? 'true').toLowerCase() !== 'false',
 } as const;

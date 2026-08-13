@@ -29,6 +29,20 @@
       "when": 1786503295097,
       "tag": "0003_bouncy_jane_foster",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786577732474,
+      "tag": "0004_melted_iron_fist",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786583253251,
+      "tag": "0005_swift_xavin",
+      "breakpoints": true
     }
   ]
 }

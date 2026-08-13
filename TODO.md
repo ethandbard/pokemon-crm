@@ -1,77 +1,34 @@
 # TODO
 
-Agreed backlog. **Items 1 and 2 below are now done** — kept for the design
-notes. Item 3 (unused PokéAPI data) is the live backlog.
+Items 1, 2, 3a, 3c, 4 and 5 are done. 3b is the live backlog.
 
 ---
 
 ## ✅ 1. Needs-attention queue (early alert) — DONE
 
-Built as `server/src/attention.ts` (scorer) + `routes/attention.ts` +
+`server/src/attention.ts` (scorer) + `routes/attention.ts` +
 `components/AttentionQueue.tsx`. Surfaced workspace-wide on Home and per-trainer
-on the Trainers dashboard.
-
-Two things worth knowing that weren't obvious when this was written:
-
-- **`growth_rate` landed first**, as the note in 3a asked. "Underlevelled" is
-  now "behind the pace the species' real EXP curve implies for its time on
-  roster", not "below the roster mean".
-- **Roster tenure had to be seeded.** Every `acquired_at` defaulted to seed
-  time, so every member had zero days on roster and the pace signal could never
-  fire — the feature would have looked fine and done nothing. `seed:trainers`
-  now backdates tenure across a deliberate spread.
-- **A review history had to be seeded too.** With none, "never reviewed" fired
-  for 39 of 40 members and the queue flagged ~everything. Seeding reviews for
-  two thirds took it to 29 of 40 with all five signals represented.
-
-Original spec follows.
-
-### Original spec
-
-The core advising loop: turn the app from something you browse into something
-that tells you what to do. A ranked "these need you this week" list on the
-trainer dashboard.
-
-Everything it needs already exists in the schema — this is a scoring query plus
-a panel, not new tables.
-
-Composite score per roster member:
-
-| Signal | Source | Why it matters |
-|---|---|---|
-| Days since last review | `activity` where `kind = 'reviewed'`, `updated_at` | Stale contact is the classic advising alert |
-| Flagged | `activity` where `kind = 'flagged'` | Explicit concern already raised |
-| Never reviewed | no `reviewed` row at all | Never made contact |
-| Milestone overdue | `milestoneEligible` and still not evolved | Requirement met, nobody signed it off |
-| Underlevelled | `roster.level` well below the roster's mean | Falling behind peers |
-
-Notes:
-- Weight the signals in **one place** on the server and return both the score
-  and the reasons, so the UI can explain *why* something is in the queue.
-  A score with no explanation is not actionable.
-- "Milestone overdue" is already computed for the roster table — reuse that SQL
-  rather than writing a second copy.
-- Consider a workspace-wide version on the Home page, not just per trainer.
+on the Trainers dashboard. Five signals: never reviewed, stale review, flagged,
+milestone overdue, behind pace. Weights and the seeding dependencies are
+documented in CLAUDE.md § Needs-attention scoring.
 
 ## ✅ 2. Interactivity layer — DONE
 
-- **Command palette (⌘K / Ctrl+K)** — `components/CommandPalette.tsx`. Pages
-  matched locally; Pokémon and trainers from the same search endpoints the
-  pages use, so there's no second index to keep in sync.
-- **Optimistic updates** — activity toggles on Profile flip immediately and roll
-  back on failure; roster kanban moves do the same.
-- **Toasts with Undo** — `components/Toast.tsx`. `confirmable()` replaces
-  `window.confirm` on destructive actions: do it, then offer Undo.
+- **Command palette (⌘K / Ctrl+K)** — `components/CommandPalette.tsx`; pages
+  matched locally, Pokémon, moves and trainers from the pages' own search
+  endpoints.
+- **Optimistic updates** — activity toggles on Profile and roster kanban moves
+  flip immediately and roll back on failure.
+- **Toasts with Undo** — `components/Toast.tsx`; `confirmable()` replaces
+  `window.confirm` on destructive actions.
 - **Multi-select + bulk actions** — `components/BulkActionBar.tsx` on Lookup,
   backed by `POST /api/activity/bulk`, `/api/notes/bulk`, and
   `/api/trainers/:id/roster/bulk`. Selection spans pages.
 - **Roster kanban** — `components/RosterBoard.tsx`, native HTML5 drag events.
-  Toggle between Table and Board on the Trainers dashboard.
 - **Saved views** — `lib/useSavedViews.ts` + `components/SavedViews.tsx`, wired
-  to Lookup, Notes, and Activity. localStorage, since these are personal UI
-  preferences and there's no auth to attach them to.
+  to Lookup, Moves, Notes, and Activity; localStorage-backed.
 
-Still open from this area:
+Still open:
 
 - Bulk actions are on Lookup only; Activity has row-level remove but no
   multi-select.
@@ -80,100 +37,96 @@ Still open from this area:
 
 ## 3. Unused PokéAPI data
 
-The seed hits three endpoints (`/pokemon`, `/pokemon-species`,
-`/evolution-chain`) and discards most of what two of them already return.
-Grouped by cost, not by priority.
+Grouped by cost, not priority.
 
-### 3a. Free — already in responses the seed fetches
+### ✅ 3a. Free — already in responses the seed fetches — DONE
 
-One migration plus changes to `buildRow` in `server/src/scripts/seed.ts`. No
-extra HTTP, so re-seed time is unchanged. Worth doing as a single batch.
+Migration `0004_melted_iron_fist.sql` (27 additive columns, 3 indexes) plus
+`buildRow`/`walkChain` in the seed. No extra HTTP. Coverage: 1025/1025 for
+flavour text, genus and cries; 856/1025 for hidden abilities; 386/1025 for
+habitat (Gen 1–3 only). Landed `flavor_text`, `genus`, hidden abilities,
+`species.generation`, `growth_rate`, `base_happiness`, `hatch_counter`,
+`evolution_condition` / `evolution_requirements`, egg groups, habitat, shape,
+`is_baby`, `gender_rate`, EV yield, held items, extra sprites and cries, and
+`regional_dex_numbers`.
 
-- **`flavor_text_entries` + `genera`** — the Pokédex blurb and the genus
-  ("Seed Pokémon"). Profile has no descriptive text at all; this is the
-  cheapest visual win available. Filter to `language.name === 'en'` and take
-  the most recent version entry — the array carries one per game.
-- **`abilities[].is_hidden` / `slot`** — the seed flattens abilities to bare
-  names and loses the hidden flag. Store `{ name, isHidden }`; it can't be
-  recovered later without a re-seed.
-- **`species.generation`** — replaces `generationForDexNumber` in
-  `constants.ts`, which buckets by dex-number ranges. The heuristic is correct
-  for 1–1025 but breaks silently on any regional form or variety, whose dex
-  ids are in the 10000s.
-- **`growth_rate`, `base_happiness`, `hatch_counter`** — `growth_rate` is the
-  valuable one: it names a real EXP curve, so combined with `roster.level` it
-  gives *pace* rather than raw level. That turns item 1's "underlevelled"
-  signal from "below the roster mean" into "behind the expected curve for
-  time on roster", which is a far better alert. **Do this before writing the
-  scoring query.**
-- **Full `evolution_details`** — `walkChain` takes `[0]` and reads only
-  `min_level` / `trigger` / `item`, dropping `min_happiness`, `time_of_day`,
-  `location`, `known_move`, `held_item`, `gender`, and `trade_species` — plus
-  every path after the first on a branching species. Those dropped fields are
-  exactly where the requirement lives for the ~⅓ of the dex with a null
-  `evolution_min_level` (see CLAUDE.md § Data model).
-- **`egg_groups`, `habitat`, `shape`, `is_baby`, `gender_rate`** — cheap
-  categorical dimensions. The Dashboard currently only slices by type,
-  generation, and BST.
-- **`stats[].effort` (EV yield)** and **`held_items`** — `effort` is the only
-  per-stat field still being dropped.
-- **`sprites.other.home`, shiny variants, `cries.latest`** — the seed keeps 2
-  of roughly 20 sprite URLs. A shiny toggle is a few lines; `cries` is an mp3
-  URL and one `<audio>` on Profile.
-- **`varieties` / `pokedex_numbers`** — `varieties` are the Mega and regional
-  forms, missing from the dataset entirely. `pokedex_numbers` gives regional
-  dex numbers, which would let Lookup scope by region — and would finally give
-  `trainers.region` a data relationship to something.
+`varieties` are stored as names only; importing the forms themselves needs extra
+HTTP, so it moved to 3b.
 
 ### 3b. Extra requests — highest payoff
 
+- **Import `varieties` as rows** — one `/pokemon/{name}` fetch per variety
+  (~250). Their dex ids are in the 10000s. Needs a decision on whether a form is
+  a row in `pokemon` or a new `pokemon_forms` table; a form sharing a dex number
+  with its base would break the primary key.
 - **`/type/{name}` — 18 requests, the biggest single unlock.**
-  `damage_relations` is the full effectiveness matrix. Per Pokémon it gives
-  defensive weaknesses; per roster it gives **coverage analysis**: "this
-  trainer's active roster is 4× weak to Ground and has no answer to Steel."
-  The Trainers page's type breakdown currently only counts types — this makes
-  it a gap report, which is the advising analogue that's actually missing.
-  Compute effectiveness server-side from a `type_damage` table; don't ship the
-  matrix to the client and fold it there.
-- **`/pokemon/{id}/encounters`** — 1,025 requests but tiny responses. Location,
-  method, and rarity per game version; backs a "where does this come from"
-  panel and a source/recruitment breakdown.
-- **`/ability/{name}`** — ~370 requests. Effect text so abilities render as
-  prose rather than slugs, plus an abilities dimension on the Dashboard.
+  `damage_relations` is the full effectiveness matrix: defensive weaknesses per
+  Pokémon, coverage gaps per roster. Compute effectiveness server-side from a
+  `type_damage` table; don't ship the matrix to the client. Upgrades 3c's
+  coverage report from "which types can this roster hit with" to "can it cover
+  what it is weak to".
+- **`/pokemon/{id}/encounters`** — 1,025 requests, tiny responses. Location,
+  method, and rarity per game version; backs a "where does this come from" panel.
+- **`/ability/{name}`** — ~370 requests. Effect text so abilities render as prose
+  rather than slugs, plus an abilities dimension on the Dashboard.
 
-### 3c. Larger — a new pillar, not a column
+### ✅ 3c. Moves — DONE
 
-- **`pokemon.moves` + `/move/{name}`** — ~900 moves and a large join table.
-  The curriculum analogy: moves learned by level are coursework with
-  prerequisites, learn method is how it was earned, and movepool coverage
-  checked against the type chart (3b) answers whether a roster member can
-  actually cover its own weaknesses. Richest unused data in the API, and the
-  only item here that's a schema project rather than an additive migration.
-- **`/nature`, `/berry`, `/item`, `/machine`** — completionist. No CRM analogy
-  that isn't a stretch; listed so nobody has to re-derive that conclusion.
+Migration `0005_swift_xavin.sql`: `moves` (797 rows) and `pokemon_moves`
+(115,026 rows). Join rows come free with the `/pokemon` responses; only ~900
+`/move/{name}` and ~30 `/version-group/{name}` fetches are extra, and
+`SEED_MOVES=false` skips them.
+
+Surfaced as `/moves` + `/moves/:id`, a movepool card on the Profile, movepool
+coverage on the trainer dashboard, four aggregations on the Performance
+Dashboard, a `moveCount` column on Lookup, and moves in the command palette.
+
+Three constraints that cost time and are easy to reintroduce — all recorded in
+CLAUDE.md § `moves` and `pokemon_moves`:
+
+- Version group **ids are not chronological** (`blue-japan` is id 29, order 2).
+- `power: 0` is not `power: null`, and neither means zero damage.
+- Coverage must exclude status moves.
+
+"Can a roster cover its own weaknesses" still needs 3b's `/type/{name}`.
+
+### 3d. Completionist
+
+- **`/nature`, `/berry`, `/item`, `/machine`** — no CRM analogy that isn't a
+  stretch.
+
+## ✅ 4. Pagination — DONE
+
+- Trainer note/activity history paginates (`notesPage`, `activityPage`,
+  `historyPageSize`), independently of each other, replacing a bare `limit 50`
+  with no total.
+- `paginationFor()` in `http.ts` builds every list envelope and adds `from`/`to`
+  ("showing 26–50 of 312"). A page past the end reports 0–0, not a backwards
+  range.
+- `usePageClamp` snaps the page back when the result set shrinks under it.
+
+## ✅ 5. Dashboard filters — DONE
+
+`/api/stats/dashboard` takes type, generation, legendary, mythical, region,
+habitat, egg group, growth rate and a BST range, and scopes **every**
+aggregation through one `scope` subquery. The response carries `scope.filtered`
+vs `scope.total` so the page states its own coverage.
 
 ---
 
 ## Known gaps (not yet scheduled)
 
-- **No tests at all.** The correlated-subquery bug (see CLAUDE.md § API
-  conventions) silently returned zeros for weeks and was only caught when a
-  later query made it ambiguous enough to crash. API-level tests over the
-  aggregation endpoints would have caught it.
-
-  CI now runs typecheck, build, and a migrations smoke test
-  (`.github/workflows/ci.yml`), so the job exists to hang tests off — but it
-  runs no tests, because there are none. The highest-value first suite is the
-  aggregation endpoints (`/api/stats/dashboard`, `/api/trainers/:id`,
-  `/api/attention`) asserted against a known seeded fixture, since those are
-  where a wrong number looks plausible rather than throwing.
-- **Trainer note/activity history is capped at 50** with no pagination and no
-  "showing 50 of N" — it silently truncates on a busy roster.
+- **No tests.** CI runs typecheck, build, and a migrations smoke test
+  (`.github/workflows/ci.yml`), so the job exists to hang tests off. Highest-value
+  first suite: the aggregation endpoints (`/api/stats/dashboard`,
+  `/api/trainers/:id`, `/api/attention`, `/api/moves/:id`) asserted against a
+  known seeded fixture.
 - **`owner` is hardcoded** to `DEFAULT_OWNER`. An "acting as" switcher would
   exercise the multi-advisor shape before real auth lands.
-- **Single ~640 kB JS chunk.** Route-level `React.lazy` would split Recharts out
+- **Single ~720 kB JS chunk.** Route-level `React.lazy` would split Recharts out
   of the pages that don't chart.
-- **No dark mode.** Deliberately deprioritised; tokens are centralised in
-  `index.css` if it comes back.
-- **Dashboard has no filters** — the EDA charts always cover the whole dataset,
-  with no way to scope by generation or type.
+- **No dark mode.** Tokens are centralised in `index.css` if it comes back.
+- **The needs-attention model ignores movepools.** A thin movepool or an
+  uncovered weakness is arguably an alert; it is a sixth signal plus a weight in
+  `ATTENTION`, and should wait for 3b's type chart so the signal can be about
+  coverage rather than raw move count.

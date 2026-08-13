@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { activity, pokemon, roster, trainers } from '../db/schema.js';
-import { asyncHandler, badRequest, notFound } from '../http.js';
+import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
 import { DEFAULT_OWNER } from '../constants.js';
 
 export const activityRouter = Router();
@@ -104,12 +104,7 @@ activityRouter.get(
       trainers: trainerOptions,
       kindCounts: Object.fromEntries(kindCounts.map((k) => [k.kind, k.count])),
       kinds: activity.kind.enumValues,
-      pagination: {
-        page: query.page,
-        pageSize: query.pageSize,
-        total: totals?.count ?? 0,
-        totalPages: Math.max(1, Math.ceil((totals?.count ?? 0) / query.pageSize)),
-      },
+      pagination: paginationFor(query.page, query.pageSize, totals?.count ?? 0),
     });
   }),
 );

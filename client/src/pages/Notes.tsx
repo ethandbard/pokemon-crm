@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toQueryString } from '../lib/api';
-import { useApi, useDebounced } from '../lib/useApi';
+import { useApi, useDebounced, usePageClamp } from '../lib/useApi';
 import type { NotesResponse } from '../lib/types';
 import {
   Button,
@@ -53,6 +53,9 @@ export function NotesPage() {
   );
 
   const { data, loading, error, refetch } = useApi<NotesResponse>(path);
+  // Deleting the last note on a page would otherwise strand the feed on an
+  // empty page that reads as "no notes match".
+  usePageClamp(data?.pagination, setPage);
   const hasFilters = Boolean(search || owner || trainerId);
 
   return (
@@ -221,12 +224,7 @@ export function NotesPage() {
               ))}
             </ul>
 
-            <Paginator
-              page={data.pagination.page}
-              totalPages={data.pagination.totalPages}
-              total={data.pagination.total}
-              onChange={setPage}
-            />
+            <Paginator pagination={data.pagination} onChange={setPage} label="note" />
           </>
         )}
       </div>
