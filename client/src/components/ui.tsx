@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { typeColor, titleCase } from '../lib/format';
+import type { MoveDamageClass, Pagination } from '../lib/types';
 
 export function Card({
   title,
@@ -105,6 +106,26 @@ export function TypeBadge({ type }: { type: string }) {
   );
 }
 
+/**
+ * Physical / Special / Status. Outlined rather than filled so it never
+ * competes with the type badge beside it — the type is the primary encoding.
+ */
+export function DamageClassBadge({ damageClass }: { damageClass: MoveDamageClass }) {
+  const styles = {
+    physical: 'border-hairline bg-plane text-ink-2',
+    special: 'border-hairline bg-plane text-ink-2',
+    status: 'border-hairline bg-surface text-muted',
+  }[damageClass];
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${styles}`}
+    >
+      {titleCase(damageClass)}
+    </span>
+  );
+}
+
 export function StatTile({
   label,
   value,
@@ -155,24 +176,54 @@ export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} className={`${controlClass} ${props.className ?? ''}`} />;
 }
 
-/** Simple offset pagination footer shared by the Lookup and Notes tables. */
+/**
+ * Offset pagination footer. Takes the API's `pagination` envelope whole rather
+ * than spread fields, so `from`/`to` can't be forgotten at a call site.
+ *
+ * `label` names the unit ("note", "flag"); `compact` drops the first/last jumps
+ * for footers inside a card.
+ */
 export function Paginator({
-  page,
-  totalPages,
-  total,
+  pagination,
   onChange,
+  label = 'result',
+  // Explicit because "Pokémon" is its own plural and "Pokémons" is not a word.
+  labelPlural = `${label}s`,
+  compact = false,
 }: {
-  page: number;
-  totalPages: number;
-  total: number;
+  pagination: Pagination;
   onChange: (page: number) => void;
+  label?: string;
+  labelPlural?: string;
+  compact?: boolean;
 }) {
+  const { page, totalPages, total, from, to } = pagination;
+
   return (
-    <div className="flex items-center justify-between border-t border-hairline px-5 py-3 text-sm">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline px-5 py-3 text-sm">
       <p className="text-muted">
-        {total.toLocaleString()} {total === 1 ? 'result' : 'results'}
+        {total === 0 ? (
+          `No ${labelPlural}`
+        ) : from === 0 ? (
+          // Past the end — the page number is about to be clamped back.
+          `${total.toLocaleString()} ${total === 1 ? label : labelPlural}`
+        ) : (
+          <>
+            {/* The visible slice, not just the total: a page of 25 out of 312
+                otherwise gives no clue which 25 are on screen. */}
+            Showing <span className="tabular-nums text-ink">{from.toLocaleString()}</span>–
+            <span className="tabular-nums text-ink">{to.toLocaleString()}</span> of{' '}
+            <span className="tabular-nums text-ink">{total.toLocaleString()}</span>{' '}
+            {total === 1 ? label : labelPlural}
+          </>
+        )}
       </p>
       <div className="flex items-center gap-2">
+        {!compact && (
+          <Button onClick={() => onChange(1)} disabled={page <= 1} aria-label="First page">
+            «
+          </Button>
+        )}
         <Button onClick={() => onChange(page - 1)} disabled={page <= 1}>
           Previous
         </Button>
@@ -182,6 +233,15 @@ export function Paginator({
         <Button onClick={() => onChange(page + 1)} disabled={page >= totalPages}>
           Next
         </Button>
+        {!compact && (
+          <Button
+            onClick={() => onChange(totalPages)}
+            disabled={page >= totalPages}
+            aria-label="Last page"
+          >
+            »
+          </Button>
+        )}
       </div>
     </div>
   );

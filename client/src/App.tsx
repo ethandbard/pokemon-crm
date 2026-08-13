@@ -5,6 +5,8 @@ import { CommandPalette } from './components/CommandPalette';
 import { HomePage } from './pages/Home';
 import { LookupPage } from './pages/Lookup';
 import { ProfilePage } from './pages/Profile';
+import { MovesPage } from './pages/Moves';
+import { MoveProfilePage } from './pages/MoveProfile';
 import { DashboardPage } from './pages/Dashboard';
 import { NotesPage } from './pages/Notes';
 import { ActivityPage } from './pages/Activity';
@@ -22,6 +24,8 @@ export default function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/lookup" element={<LookupPage />} />
             <Route path="/pokemon/:id" element={<ProfilePage />} />
+            <Route path="/moves" element={<MovesPage />} />
+            <Route path="/moves/:id" element={<MoveProfilePage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/notes" element={<NotesPage />} />
             <Route path="/trainers" element={<TrainersPage />} />

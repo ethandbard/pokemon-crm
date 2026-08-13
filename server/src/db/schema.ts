@@ -2,6 +2,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   serial,
@@ -16,6 +17,42 @@ import { relations } from 'drizzle-orm';
  * unique index below means re-reviewing updates the existing row's timestamp
  * rather than piling up duplicates.
  */
+/**
+ * One way to reach a species from its predecessor, straight from PokeAPI's
+ * `evolution_details`. Every field is optional because a single trigger uses
+ * only a handful of them — `level-up` reads `minLevel`, `use-item` reads
+ * `item`, `trade` reads `tradeSpecies`, and so on.
+ *
+ * Stored as jsonb rather than columns because the shape is genuinely sparse
+ * and variable, and because an edge can have MORE THAN ONE of these (Sylveon
+ * has two routes). The flattened, human-readable version of the first entry
+ * lives in `pokemon.evolution_condition`, which is what the UI reads.
+ */
+export interface EvolutionRequirement {
+  trigger: string | null;
+  minLevel?: number;
+  minHappiness?: number;
+  minBeauty?: number;
+  minAffection?: number;
+  item?: string;
+  heldItem?: string;
+  knownMove?: string;
+  knownMoveType?: string;
+  timeOfDay?: string;
+  location?: string;
+  gender?: 'female' | 'male';
+  tradeSpecies?: string;
+  partySpecies?: string;
+  partyType?: string;
+  /** 1 = attack > defense, 0 = equal, -1 = attack < defense (Tyrogue). */
+  relativePhysicalStats?: number;
+  needsOverworldRain?: boolean;
+  turnUpsideDown?: boolean;
+}
+
+/** `{ kanto: 25, "original-johto": 22 }` — regional dex numbers, by pokédex slug. */
+export type RegionalDexNumbers = Record<string, number>;
+
 export const activityKind = pgEnum('activity_kind', [
   'caught',
   'favorite',
@@ -23,6 +60,13 @@ export const activityKind = pgEnum('activity_kind', [
   'flagged',
   'reviewed',
 ]);
+
+/**
+ * How a move deals damage. Closed since generation 4 — PokeAPI has shipped
+ * exactly these three for every move, which is why this is an enum where
+ * `pokemon_moves.learn_method` (open-ended, and still growing) is plain text.
+ */
+export const moveDamageClass = pgEnum('move_damage_class', ['physical', 'special', 'status']);
 
 /**
  * Core reference table. Populated once by `npm run seed` from PokeAPI; the app
@@ -51,6 +95,21 @@ export const pokemon = pgTable(
     /** Denormalised sum of the six base stats — sorted on constantly. */
     baseStatTotal: integer('base_stat_total').notNull(),
 
+    /*
+     * Effort-value yield: what defeating this species trains in the victor.
+     * Six columns mirroring the six base stats above, for the same reason —
+     * they get filtered and averaged, so plain integer columns beat an array.
+     * Almost always 0–3 and mostly zero; `evYieldTotal` is the denormalised sum
+     * so "what does this train" is one indexed comparison.
+     */
+    evHp: integer('ev_hp').notNull().default(0),
+    evAttack: integer('ev_attack').notNull().default(0),
+    evDefense: integer('ev_defense').notNull().default(0),
+    evSpecialAttack: integer('ev_special_attack').notNull().default(0),
+    evSpecialDefense: integer('ev_special_defense').notNull().default(0),
+    evSpeed: integer('ev_speed').notNull().default(0),
+    evYieldTotal: integer('ev_yield_total').notNull().default(0),
+
     /** Decimetres, as PokeAPI reports it. */
     height: integer('height').notNull(),
     /** Hectograms, as PokeAPI reports it. */
@@ -58,8 +117,54 @@ export const pokemon = pgTable(
     baseExperience: integer('base_experience'),
     captureRate: integer('capture_rate'),
 
+    /**
+     * Ordinary abilities in slot order. The hidden ability is deliberately NOT
+     * in here — it isn't selectable the way these are, so folding it in would
+     * make "this species' abilities" mean two different things. Splitting it
+     * out keeps both plain, indexable SQL, the same reasoning as `type1`/`type2`.
+     */
     abilities: text('abilities').array().notNull().default([]),
+    /** The Hidden Ability, if the species has one. At most one exists. */
+    hiddenAbility: text('hidden_ability'),
+    /** Item names this species can be found holding in the wild. */
+    heldItems: text('held_items').array().notNull().default([]),
     color: text('color'),
+
+    /*
+     * Descriptive text — the Pokédex-facing copy, which is the only prose the
+     * dataset carries. `flavorText` is normalised (PokeAPI embeds hard line
+     * breaks and form feeds), and `flavorTextVersion` records which game's entry
+     * won, since the API returns one per version and they differ.
+     */
+    genus: text('genus'),
+    flavorText: text('flavor_text'),
+    flavorTextVersion: text('flavor_text_version'),
+
+    /*
+     * Species/breeding dimensions. Cheap categorical slices the dashboard can
+     * group by, and the closest thing the dataset has to demographic fields.
+     */
+    eggGroups: text('egg_groups').array().notNull().default([]),
+    habitat: text('habitat'),
+    shape: text('shape'),
+    isBaby: boolean('is_baby').notNull().default(false),
+    /** Eighths female: 0 = always male, 8 = always female, **-1 = genderless**. */
+    genderRate: integer('gender_rate'),
+    baseHappiness: integer('base_happiness'),
+    /** Egg cycles to hatch. Higher means rarer/stronger, roughly. */
+    hatchCounter: integer('hatch_counter'),
+
+    /**
+     * Alternate forms (Mega, Gigantamax, regional) as PokeAPI variety slugs.
+     * Names only: importing the forms themselves means fetching each one, and
+     * their dex ids land in the 10000s, which is a separate piece of work.
+     */
+    varieties: text('varieties').array().notNull().default([]),
+    /**
+     * Regional Pokédex numbers keyed by pokédex slug. This is what gives
+     * `trainers.region` something to actually join against.
+     */
+    regionalDexNumbers: jsonb('regional_dex_numbers').$type<RegionalDexNumbers>(),
     /**
      * PokeAPI growth rate name (`medium-slow`, `fast`, …). Joins to
      * `growth_rates` for the real EXP curve, which is what makes "behind pace"
@@ -71,6 +176,13 @@ export const pokemon = pgTable(
 
     spriteUrl: text('sprite_url'),
     artworkUrl: text('artwork_url'),
+    /** Shiny counterparts of the two above, for the Profile's shiny toggle. */
+    shinySpriteUrl: text('shiny_sprite_url'),
+    shinyArtworkUrl: text('shiny_artwork_url'),
+    /** Pokémon HOME render — cleaner and consistent across the whole dex. */
+    homeArtworkUrl: text('home_artwork_url'),
+    /** mp3 of the species' cry. One `<audio>` element on the profile. */
+    cryUrl: text('cry_url'),
 
     /*
      * Evolution chain — the "degree progress" model. A chain is a programme of
@@ -87,6 +199,18 @@ export const pokemon = pgTable(
     /** Null when the trigger isn't level-based (stone, trade, friendship…). */
     evolutionMinLevel: integer('evolution_min_level'),
     evolutionTrigger: text('evolution_trigger'),
+    /**
+     * The requirement as a sentence — "Level 16", "Use a Thunder Stone",
+     * "High friendship, at night", "Trade holding a Metal Coat".
+     *
+     * `evolutionMinLevel` is null for roughly a third of the dex, so on its own
+     * the evolution model can't say what those species actually need. This
+     * column is the flattened, displayable answer; `evolutionRequirements`
+     * below keeps the structured source it was derived from.
+     */
+    evolutionCondition: text('evolution_condition'),
+    /** Every route into this species, unflattened. See EvolutionRequirement. */
+    evolutionRequirements: jsonb('evolution_requirements').$type<EvolutionRequirement[]>(),
     isFullyEvolved: boolean('is_fully_evolved').notNull().default(true),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -99,6 +223,11 @@ export const pokemon = pgTable(
     index('pokemon_base_stat_total_idx').on(table.baseStatTotal),
     index('pokemon_evolution_chain_idx').on(table.evolutionChainId),
     index('pokemon_evolves_from_idx').on(table.evolvesFromId),
+    // The new categorical dimensions are filtered on from Lookup and grouped
+    // by on the Dashboard, same as type1/generation above.
+    index('pokemon_habitat_idx').on(table.habitat),
+    index('pokemon_shape_idx').on(table.shape),
+    index('pokemon_growth_rate_idx').on(table.growthRate),
   ],
 );
 
@@ -146,6 +275,124 @@ export const activity = pgTable(
   (table) => [
     uniqueIndex('activity_pokemon_owner_kind_idx').on(table.pokemonId, table.owner, table.kind),
     index('activity_kind_idx').on(table.kind),
+  ],
+);
+
+/**
+ * Reference data for moves, from PokeAPI's `/move/{name}`. Written only by the
+ * seed, exactly like `pokemon`, and keyed by PokeAPI's own move id so the join
+ * table survives a re-seed.
+ *
+ * The curriculum analogy: a move is a **course**. `pokemon_moves` below is the
+ * enrolment record — which species can take it, how it's earned, and (for
+ * level-up moves) the level that gates it.
+ */
+export const moves = pgTable(
+  'moves',
+  {
+    id: integer('id').primaryKey(),
+    name: text('name').notNull(),
+    displayName: text('display_name').notNull(),
+    /** Move type — joins conceptually to `pokemon.type1`/`type2`. */
+    type: text('type').notNull(),
+    damageClass: moveDamageClass('damage_class').notNull(),
+    generation: integer('generation'),
+
+    /**
+     * Null is meaningful on all three: a status move has no `power`, a move
+     * that never misses has no `accuracy` (Swift, Aerial Ace), and PokeAPI
+     * reports `pp` as null for a handful of Shadow moves. Rendering a null as
+     * 0 would say "always misses" / "no PP", so display sites show "—".
+     */
+    power: integer('power'),
+    accuracy: integer('accuracy'),
+    pp: integer('pp'),
+    /** Turn order modifier: +1 Quick Attack, -6 Trick Room. 0 for most moves. */
+    priority: integer('priority').notNull().default(0),
+
+    /**
+     * The one-line effect, with PokeAPI's `$effect_chance` placeholder already
+     * substituted — the raw string reads "has a $effect_chance% chance", which
+     * is not something to ship to a page.
+     */
+    effect: text('effect'),
+    effectChance: integer('effect_chance'),
+    /** Flavour text from the most recent English entry, same rule as `pokemon`. */
+    flavorText: text('flavor_text'),
+
+    /** Meta fields from `/move/{name}`.meta — the secondary effects. */
+    ailment: text('ailment'),
+    ailmentChance: integer('ailment_chance'),
+    critRate: integer('crit_rate'),
+    /** Percent of damage dealt recovered (positive) or taken as recoil (negative). */
+    drain: integer('drain'),
+    healing: integer('healing'),
+    /** What the move hits — `selected-pokemon`, `all-opponents`, `user`, … */
+    target: text('target'),
+
+    /**
+     * Denormalised count of species that learn this move by any method. It is
+     * sorted and filtered on constantly ("what does everything learn?"), and
+     * the alternative is a group-by over ~90k join rows on every list request.
+     * The seed recomputes it; nothing else writes it.
+     */
+    learnedByCount: integer('learned_by_count').notNull().default(0),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('moves_name_idx').on(table.name),
+    index('moves_type_idx').on(table.type),
+    index('moves_damage_class_idx').on(table.damageClass),
+    index('moves_power_idx').on(table.power),
+    index('moves_learned_by_count_idx').on(table.learnedByCount),
+  ],
+);
+
+/**
+ * Which species learn which move, and how — the join table the whole moves
+ * feature exists for.
+ *
+ * **One row per (pokemon, move, learn method), not per version group.** PokeAPI
+ * reports a `version_group_details` entry per game a move appears in, which
+ * would multiply this table by ~20 for no analytical gain. The seed keeps the
+ * most recent version group for each method and records which one won in
+ * `version_group`, so a level is always attributable to a specific game rather
+ * than being an average of thirty of them.
+ *
+ * `level_learned_at` is 0 for every method except `level-up` — that's PokeAPI's
+ * own encoding for "not gated by level", kept rather than nulled so ordering a
+ * movepool by level needs no coalesce.
+ */
+export const pokemonMoves = pgTable(
+  'pokemon_moves',
+  {
+    id: serial('id').primaryKey(),
+    pokemonId: integer('pokemon_id')
+      .notNull()
+      .references(() => pokemon.id, { onDelete: 'cascade' }),
+    moveId: integer('move_id')
+      .notNull()
+      .references(() => moves.id, { onDelete: 'cascade' }),
+    /**
+     * `level-up`, `machine`, `egg`, `tutor`, plus a long tail of one-game
+     * oddities (`light-ball-egg`, `xd-shadow`, `form-change`). Text rather than
+     * an enum because PokeAPI keeps adding to it and none of them justify a
+     * migration.
+     */
+    learnMethod: text('learn_method').notNull(),
+    levelLearnedAt: integer('level_learned_at').notNull().default(0),
+    /** Which game's data this row reflects — see the note above. */
+    versionGroup: text('version_group'),
+  },
+  (table) => [
+    uniqueIndex('pokemon_moves_unique_idx').on(table.pokemonId, table.moveId, table.learnMethod),
+    index('pokemon_moves_pokemon_idx').on(table.pokemonId),
+    index('pokemon_moves_move_idx').on(table.moveId),
+    index('pokemon_moves_method_idx').on(table.learnMethod),
+    // "What does this Pokémon learn, in level order" is the movepool query.
+    index('pokemon_moves_pokemon_level_idx').on(table.pokemonId, table.levelLearnedAt),
   ],
 );
 
@@ -233,6 +480,16 @@ export const pokemonRelations = relations(pokemon, ({ many }) => ({
   notes: many(notes),
   activity: many(activity),
   roster: many(roster),
+  moves: many(pokemonMoves),
+}));
+
+export const movesRelations = relations(moves, ({ many }) => ({
+  learners: many(pokemonMoves),
+}));
+
+export const pokemonMovesRelations = relations(pokemonMoves, ({ one }) => ({
+  pokemon: one(pokemon, { fields: [pokemonMoves.pokemonId], references: [pokemon.id] }),
+  move: one(moves, { fields: [pokemonMoves.moveId], references: [moves.id] }),
 }));
 
 export const trainersRelations = relations(trainers, ({ many }) => ({
@@ -263,3 +520,8 @@ export type NewTrainer = typeof trainers.$inferInsert;
 export type RosterEntry = typeof roster.$inferSelect;
 export type NewRosterEntry = typeof roster.$inferInsert;
 export type RosterStatus = (typeof rosterStatus.enumValues)[number];
+export type Move = typeof moves.$inferSelect;
+export type NewMove = typeof moves.$inferInsert;
+export type MoveDamageClass = (typeof moveDamageClass.enumValues)[number];
+export type PokemonMove = typeof pokemonMoves.$inferSelect;
+export type NewPokemonMove = typeof pokemonMoves.$inferInsert;

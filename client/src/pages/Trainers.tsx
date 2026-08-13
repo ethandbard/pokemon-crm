@@ -10,7 +10,7 @@ import {
   YAxis,
 } from 'recharts';
 import { api, toQueryString } from '../lib/api';
-import { useApi, useDebounced } from '../lib/useApi';
+import { useApi, useDebounced, usePageClamp } from '../lib/useApi';
 import type { RosterMember, TrainerDashboardResponse, TrainerListItem } from '../lib/types';
 import { TrainerForm } from '../components/TrainerForm';
 import { AddRosterMember, EditRosterMember } from '../components/RosterEditor';
@@ -23,6 +23,7 @@ import {
   EmptyState,
   ErrorState,
   Loading,
+  Paginator,
   StatTile,
   TextInput,
   TypeBadge,
@@ -225,9 +226,16 @@ function TrainerDashboard({
   onTrainerChanged: () => void;
   onTrainerDeleted: () => void;
 }) {
+  // The two histories page independently, so reading further back through the
+  // notes doesn't move the activity card underneath it.
+  const [notesPage, setNotesPage] = useState(1);
+  const [activityPage, setActivityPage] = useState(1);
+
   const { data, loading, error, refetch } = useApi<TrainerDashboardResponse>(
-    `/api/trainers/${trainerId}`,
+    `/api/trainers/${trainerId}${toQueryString({ notesPage, activityPage, historyPageSize: 10 })}`,
   );
+  usePageClamp(data?.notesPagination, setNotesPage);
+  usePageClamp(data?.activityPagination, setActivityPage);
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [editingMember, setEditingMember] = useState<RosterMember | null>(null);
@@ -239,10 +247,23 @@ function TrainerDashboard({
   if (error) return <ErrorState message={error} onRetry={refetch} />;
   if (!data) return null;
 
-  const { trainer, roster, summary, typeBreakdown, statAverages, notes, activity } = data;
+  const {
+    trainer,
+    roster,
+    summary,
+    typeBreakdown,
+    statAverages,
+    moveCoverage,
+    movepool,
+    notes,
+    activity,
+  } = data;
 
   const typeData = typeBreakdown.map((row) => ({ ...row, type: titleCase(row.type) }));
   const eligible = roster.filter((m) => m.milestoneEligible);
+  const coverageData = moveCoverage.map((row) => ({ ...row, type: titleCase(row.type) }));
+  // The zeroes are the finding — types nothing on the active roster can hit.
+  const coverageGaps = moveCoverage.filter((row) => row.members === 0);
 
   async function deleteTrainer() {
     if (
@@ -392,9 +413,19 @@ function TrainerDashboard({
                     <img src={member.spriteUrl} alt="" width={24} height={24} className="h-6 w-6" />
                   )}
                   {member.nickname ?? member.displayName}
-                  <span className="font-normal text-ink-2">
-                    Lv {member.level} → {member.nextEvolution?.display_name} (needs{' '}
-                    {member.nextEvolution?.evolution_min_level})
+                  {/* The requirement in words. `evolution_condition` covers
+                      the non-level triggers too, where the bare level read as
+                      "(needs undefined)". */}
+                  <span
+                    className="font-normal text-ink-2"
+                    title={member.nextEvolution?.evolution_condition ?? undefined}
+                  >
+                    Lv {member.level} → {member.nextEvolution?.display_name}
+                    {member.nextEvolution?.evolution_min_level != null
+                      ? ` (needs ${member.nextEvolution.evolution_min_level})`
+                      : member.nextEvolution?.evolution_condition
+                        ? ` (${member.nextEvolution.evolution_condition})`
+                        : ''}
                   </span>
                 </Link>
               </li>
@@ -479,6 +510,9 @@ function TrainerDashboard({
                     <th scope="col" className="px-2 py-2 text-right font-medium">
                       BST
                     </th>
+                    <th scope="col" className="px-2 py-2 text-right font-medium">
+                      Moves
+                    </th>
                     <th scope="col" className="px-2 py-2 text-left font-medium">
                       Progress
                     </th>
@@ -546,6 +580,17 @@ function TrainerDashboard({
                         <td className="px-2 py-2 text-right font-medium tabular-nums text-ink">
                           {member.baseStatTotal}
                         </td>
+                        <td className="px-2 py-2 text-right tabular-nums">
+                          <span className="text-ink">{member.moveCount}</span>
+                          {/* Coverage beside the raw count: a wide movepool
+                              that only attacks with two types is not wide. */}
+                          <span
+                            className="block text-[11px] text-muted"
+                            title="Types this member can attack with"
+                          >
+                            {member.coverageCount}/18 types
+                          </span>
+                        </td>
                         <td className="px-2 py-2">
                           <EvolutionProgress
                             stage={member.evolutionStage}
@@ -606,6 +651,61 @@ function TrainerDashboard({
               </div>
             </Card>
 
+            {/*
+              The type breakdown above says what the roster IS; this says what
+              it can HIT. Every one of the 18 types is plotted, so a bar at zero
+              is a gap the trainer has no answer to.
+            */}
+            <Card
+              title="Movepool coverage"
+              subtitle="Active roster members that can attack with each type — status moves excluded"
+              className="lg:col-span-2"
+              actions={
+                <Link
+                  to={`/moves${toQueryString({ trainerId: trainer.id })}`}
+                  className="text-xs font-medium text-brand hover:underline"
+                >
+                  Moves this roster can learn →
+                </Link>
+              }
+            >
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={coverageData} margin={{ top: 8, right: 8, bottom: 4, left: -18 }}>
+                    <CartesianGrid vertical={false} stroke="var(--color-hairline)" />
+                    <XAxis dataKey="type" {...axisProps} angle={-35} textAnchor="end" height={58} />
+                    <YAxis {...axisProps} allowDecimals={false} />
+                    <Tooltip {...tooltipProps} />
+                    <Bar
+                      isAnimationActive={false}
+                      dataKey="members"
+                      name="Members"
+                      fill="var(--color-series-1)"
+                      radius={[4, 4, 0, 0]}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-hairline pt-3 text-xs">
+                <span className="text-muted">
+                  {movepool?.types_covered ?? 0} of 18 types covered ·{' '}
+                  {(movepool?.distinct_moves ?? 0).toLocaleString()} distinct moves ·{' '}
+                  {movepool?.avg_movepool ?? 0} moves per member on average
+                </span>
+                {coverageGaps.length > 0 && (
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <span className="font-medium text-status-critical">
+                      <span aria-hidden="true">▲ </span>No answer to:
+                    </span>
+                    {coverageGaps.map((gap) => (
+                      <TypeBadge key={gap.type} type={gap.type} />
+                    ))}
+                  </span>
+                )}
+              </div>
+            </Card>
+
             <Card title="Mean base stats" subtitle="Averaged across this roster">
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
@@ -626,7 +726,12 @@ function TrainerDashboard({
       {/* ---- Note history across the roster ---- */}
       <Card
         title="Note history"
-        subtitle="Notes on any Pokémon in this roster"
+        subtitle={
+          data.notesPagination.total > 0
+            ? `${data.notesPagination.total.toLocaleString()} ${data.notesPagination.total === 1 ? 'note' : 'notes'} on Pokémon in this roster`
+            : 'Notes on any Pokémon in this roster'
+        }
+        className="overflow-hidden"
         actions={
           <Link
             to={`/notes${toQueryString({ trainerId: trainer.id })}`}
@@ -683,6 +788,17 @@ function TrainerDashboard({
                 ))}
               </tbody>
             </table>
+
+            {/* This card used to show a bare `limit 50` with no total, so a
+                busy roster truncated silently. */}
+            <div className="-mx-5 -mb-5 mt-2">
+              <Paginator
+                pagination={data.notesPagination}
+                onChange={setNotesPage}
+                label="note"
+                compact
+              />
+            </div>
           </div>
         )}
       </Card>
@@ -690,7 +806,12 @@ function TrainerDashboard({
       {/* ---- Activity history across the roster ---- */}
       <Card
         title="Activity history"
-        subtitle="Status flags on any Pokémon in this roster"
+        subtitle={
+          data.activityPagination.total > 0
+            ? `${data.activityPagination.total.toLocaleString()} status ${data.activityPagination.total === 1 ? 'flag' : 'flags'} on Pokémon in this roster`
+            : 'Status flags on any Pokémon in this roster'
+        }
+        className="overflow-hidden"
         actions={
           <Link
             to={`/activity${toQueryString({ trainerId: trainer.id })}`}
@@ -761,6 +882,15 @@ function TrainerDashboard({
                 })}
               </tbody>
             </table>
+
+            <div className="-mx-5 -mb-5 mt-2">
+              <Paginator
+                pagination={data.activityPagination}
+                onChange={setActivityPage}
+                label="flag"
+                compact
+              />
+            </div>
           </div>
         )}
       </Card>

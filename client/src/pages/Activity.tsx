@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, toQueryString } from '../lib/api';
-import { useApi, useDebounced } from '../lib/useApi';
+import { useApi, useDebounced, usePageClamp } from '../lib/useApi';
 import type { ActivityKind, ActivityListResponse } from '../lib/types';
 import {
   Button,
@@ -62,6 +62,9 @@ export function ActivityPage() {
   );
 
   const { data, loading, error, refetch } = useApi<ActivityListResponse>(path);
+  // Removing the last flag on a page would otherwise leave the table on an
+  // empty page that reads as "no matches".
+  usePageClamp(data?.pagination, setPage);
   const hasFilters = Boolean(search || kind || owner || trainerId);
 
   function toggleSort(key: string) {
@@ -331,12 +334,7 @@ export function ActivityPage() {
               </table>
             </div>
 
-            <Paginator
-              page={data.pagination.page}
-              totalPages={data.pagination.totalPages}
-              total={data.pagination.total}
-              onChange={setPage}
-            />
+            <Paginator pagination={data.pagination} onChange={setPage} label="flag" />
           </>
         )}
       </div>

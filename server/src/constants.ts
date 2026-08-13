@@ -80,10 +80,67 @@ export const POKEMON_TYPES = [
 
 export type PokemonType = (typeof POKEMON_TYPES)[number];
 
-/** Highest National Dex number per generation, used to bucket seeded rows. */
+/**
+ * Highest National Dex number per generation.
+ *
+ * Only a **fallback** now — `generation` comes from the species' own
+ * `generation` field during the seed (see `generationForSlug`). This bucketing
+ * is correct for dex 1–1025 but wrong for any regional form or variety, whose
+ * ids are in the 10000s and would silently bucket as generation 9.
+ */
 export const GENERATION_MAX_DEX = [151, 251, 386, 493, 649, 721, 809, 905, 1025] as const;
 
 export function generationForDexNumber(dex: number): number {
   const index = GENERATION_MAX_DEX.findIndex((max) => dex <= max);
   return index === -1 ? GENERATION_MAX_DEX.length : index + 1;
 }
+
+/**
+ * `generation-iv` → 4. PokeAPI names generations with lowercase Roman
+ * numerals; this is the authoritative source the dex-number buckets above were
+ * only ever approximating.
+ */
+const GENERATION_SLUGS = [
+  'generation-i',
+  'generation-ii',
+  'generation-iii',
+  'generation-iv',
+  'generation-v',
+  'generation-vi',
+  'generation-vii',
+  'generation-viii',
+  'generation-ix',
+] as const;
+
+export function generationForSlug(slug: string | null | undefined): number | null {
+  const index = GENERATION_SLUGS.indexOf(slug as (typeof GENERATION_SLUGS)[number]);
+  return index === -1 ? null : index + 1;
+}
+
+/**
+ * Regions, mapped to the PokeAPI pokédex slugs that cover them.
+ *
+ * `pokemon.regional_dex_numbers` is keyed by pokédex slug, and a region often
+ * has several — Kanto appears as both the original dex and the Let's Go one,
+ * Kalos is split into three sub-dexes. A species counts as belonging to a
+ * region if it appears in **any** of that region's dexes.
+ *
+ * This is what gives `trainers.region` an actual data relationship: a Kanto
+ * trainer's roster can now be checked against the Kanto dex.
+ */
+export const REGION_POKEDEXES = {
+  Kanto: ['kanto', 'letsgo-kanto'],
+  Johto: ['original-johto', 'updated-johto'],
+  Hoenn: ['hoenn', 'updated-hoenn'],
+  Sinnoh: ['original-sinnoh', 'extended-sinnoh'],
+  Unova: ['original-unova', 'updated-unova'],
+  Kalos: ['kalos-central', 'kalos-coastal', 'kalos-mountain'],
+  Alola: ['original-alola', 'updated-alola'],
+  Galar: ['galar', 'isle-of-armor', 'crown-tundra'],
+  Hisui: ['hisui'],
+  Paldea: ['paldea', 'kitakami', 'blueberry'],
+} as const;
+
+export const REGIONS = Object.keys(REGION_POKEDEXES) as [Region, ...Region[]];
+
+export type Region = keyof typeof REGION_POKEDEXES;

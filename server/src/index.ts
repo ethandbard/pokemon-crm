@@ -5,6 +5,7 @@ import { env } from './env.js';
 import { db, pool } from './db/client.js';
 import { errorHandler, asyncHandler } from './http.js';
 import { pokemonRouter } from './routes/pokemon.js';
+import { movesRouter } from './routes/moves.js';
 import { notesRouter } from './routes/notes.js';
 import { activityRouter } from './routes/activity.js';
 import { statsRouter } from './routes/stats.js';
@@ -26,6 +27,7 @@ app.get(
 );
 
 app.use('/api/pokemon', pokemonRouter);
+app.use('/api/moves', movesRouter);
 app.use('/api/notes', notesRouter);
 app.use('/api/activity', activityRouter);
 app.use('/api/stats', statsRouter);

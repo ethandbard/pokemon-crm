@@ -1,11 +1,20 @@
 import { Link } from 'react-router-dom';
 import type { EvolutionLink } from '../lib/types';
-import { titleCase } from '../lib/format';
+import { slugLabel } from '../lib/format';
 
-/** `thunder-stone` → `Thunder stone`, `level-up` → `Level up`. */
-function readableTrigger(trigger: string | null): string {
-  if (!trigger) return '—';
-  return titleCase(trigger.replace(/-/g, ' '));
+/**
+ * What it takes to reach this stage.
+ *
+ * `evolutionCondition` is built by the seed from the full `evolution_details`
+ * and already reads as a sentence ("Use a Thunder Stone", "Level up with high
+ * friendship, at night"). It covers the roughly one third of the dex that has
+ * no `evolutionMinLevel`, which previously showed a bare trigger slug or "—".
+ * The level and trigger are fallbacks for rows seeded before that column landed.
+ */
+function requirementLabel(link: EvolutionLink): string {
+  if (link.evolutionCondition) return link.evolutionCondition;
+  if (link.evolutionMinLevel) return `Level ${link.evolutionMinLevel}`;
+  return link.evolutionTrigger ? slugLabel(link.evolutionTrigger) : '—';
 }
 
 /**
@@ -95,12 +104,15 @@ export function EvolutionChain({
                     )}
                     <span className="min-w-0">
                       <span className="block truncate text-xs font-medium">{link.displayName}</span>
-                      <span className="block text-[11px] text-muted">
-                        {stage === 1
-                          ? 'Base form'
-                          : link.evolutionMinLevel
-                            ? `Lv ${link.evolutionMinLevel}`
-                            : readableTrigger(link.evolutionTrigger)}
+                      {/* Conditions can be a full clause ("Level up with high
+                          friendship, during the night"), so it truncates and
+                          the tooltip carries the rest rather than the chip
+                          growing wide enough to break the row. */}
+                      <span
+                        className="block max-w-[14rem] truncate text-[11px] text-muted"
+                        title={stage === 1 ? undefined : requirementLabel(link)}
+                      >
+                        {stage === 1 ? 'Base form' : requirementLabel(link)}
                       </span>
                     </span>
                   </>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
+import type { Pagination } from './types';
 
 export interface AsyncState<T> {
   data: T | null;
@@ -59,6 +60,28 @@ export function useApi<T>(path: string | null): AsyncState<T> {
   const refetch = useCallback(() => setNonce((n) => n + 1), []);
 
   return { data, loading, error, refetch };
+}
+
+/**
+ * Page state that can't strand you past the end of the results.
+ *
+ * Filtering or deleting while on page 8 of 12 leaves the page number pointing
+ * past a now-shorter result set, and the response comes back empty — which
+ * reads as "no matches" when matches exist on page 1. This snaps the page back
+ * to the last real one whenever the total shrinks below it.
+ *
+ * `setPage` is also what filter handlers call to reset to page 1.
+ */
+export function usePageClamp(
+  pagination: Pagination | undefined,
+  setPage: (page: number) => void,
+) {
+  const page = pagination?.page;
+  const totalPages = pagination?.totalPages;
+
+  useEffect(() => {
+    if (page !== undefined && totalPages !== undefined && page > totalPages) setPage(totalPages);
+  }, [page, totalPages, setPage]);
 }
 
 /** Debounces a rapidly-changing value — used for the search inputs. */

@@ -62,6 +62,17 @@ const DESTINATIONS: Destination[] = [
     ),
   },
   {
+    to: '/moves',
+    title: 'Moves',
+    description: 'The move catalogue behind every Pokémon movepool.',
+    bullets: [
+      'Filter by type, damage class, generation, or how it is learned',
+      'See which species learn a move, at what level, and by what route',
+      'Trainers whose active roster can field it',
+    ],
+    icon: iconWrap(<path d="M13 3 5 13h6l-2 8 8-10h-6z" />),
+  },
+  {
     to: '/trainers',
     title: 'Trainers',
     description: 'Trainers and the rosters of Pokémon they carry.',
@@ -174,8 +185,13 @@ export function HomePage() {
         ) : error ? (
           <ErrorState message={error} onRetry={refetch} />
         ) : (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
             <StatTile label="Pokémon seeded" value={(data?.summary?.total ?? 0).toLocaleString()} />
+            <StatTile
+              label="Moves imported"
+              value={(data?.movepool?.distinct_moves ?? 0).toLocaleString()}
+              hint={`${data?.movepool?.avg_movepool ?? 0} per species`}
+            />
             <StatTile label="Notes written" value={data?.crm?.note_count ?? 0} />
             <StatTile label="Status flags set" value={activityTotal} />
             <StatTile

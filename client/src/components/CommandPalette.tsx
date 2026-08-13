@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toQueryString } from '../lib/api';
 import { useApi, useDebounced } from '../lib/useApi';
-import type { PokemonListResponse, TrainerListItem } from '../lib/types';
+import type { MovesResponse, PokemonListResponse, TrainerListItem } from '../lib/types';
 import { dexNumber } from '../lib/format';
 import { useHotkey } from './Toast';
 
@@ -10,7 +10,7 @@ interface Command {
   id: string;
   label: string;
   hint?: string;
-  group: 'Pages' | 'Pokémon' | 'Trainers';
+  group: 'Pages' | 'Pokémon' | 'Moves' | 'Trainers';
   icon?: string;
   spriteUrl?: string | null;
   to: string;
@@ -19,6 +19,7 @@ interface Command {
 const PAGES: Command[] = [
   { id: 'page-home', label: 'Home', group: 'Pages', icon: '⌂', to: '/' },
   { id: 'page-lookup', label: 'Pokémon Lookup', group: 'Pages', icon: '⌕', to: '/lookup' },
+  { id: 'page-moves', label: 'Moves', group: 'Pages', icon: '⚔', to: '/moves' },
   { id: 'page-trainers', label: 'Trainers', group: 'Pages', icon: '☰', to: '/trainers' },
   { id: 'page-dashboard', label: 'Performance Dashboard', group: 'Pages', icon: '▤', to: '/dashboard' },
   { id: 'page-notes', label: 'Notes', group: 'Pages', icon: '✎', to: '/notes' },
@@ -54,9 +55,11 @@ export function CommandPalette() {
   const pokemonPath = trimmed
     ? `/api/pokemon${toQueryString({ search: trimmed, pageSize: 6 })}`
     : null;
+  const movePath = trimmed ? `/api/moves${toQueryString({ search: trimmed, pageSize: 5 })}` : null;
   const trainerPath = trimmed ? `/api/trainers${toQueryString({ search: trimmed })}` : null;
 
   const pokemonResults = useApi<PokemonListResponse>(pokemonPath);
+  const moveResults = useApi<MovesResponse>(movePath);
   const trainerResults = useApi<{ data: TrainerListItem[] }>(trainerPath);
 
   const commands = useMemo<Command[]>(() => {
@@ -78,6 +81,18 @@ export function CommandPalette() {
           }))
         : [];
 
+    const moveCommands: Command[] =
+      moveResults.data?.data
+        ? moveResults.data.data.slice(0, 5).map((move) => ({
+            id: `move-${move.id}`,
+            label: move.displayName,
+            hint: `${move.type} · ${move.damageClass}${move.power ? ` · ${move.power} power` : ''}`,
+            group: 'Moves',
+            icon: '⚔',
+            to: `/moves/${move.id}`,
+          }))
+        : [];
+
     const trainerCommands: Command[] =
       trainerResults.data?.data
         ? trainerResults.data.data.slice(0, 5).map((trainer) => ({
@@ -90,8 +105,8 @@ export function CommandPalette() {
           }))
         : [];
 
-    return [...pages, ...pokemonCommands, ...trainerCommands];
-  }, [trimmed, pokemonResults.data, trainerResults.data]);
+    return [...pages, ...pokemonCommands, ...moveCommands, ...trainerCommands];
+  }, [trimmed, pokemonResults.data, moveResults.data, trainerResults.data]);
 
   // Reset the cursor whenever the result set changes, so Enter can't fire a
   // stale selection.
@@ -133,7 +148,8 @@ export function CommandPalette() {
     }
   }
 
-  const loading = Boolean(trimmed) && (pokemonResults.loading || trainerResults.loading);
+  const loading =
+    Boolean(trimmed) && (pokemonResults.loading || moveResults.loading || trainerResults.loading);
   let lastGroup: string | null = null;
 
   return (
@@ -158,7 +174,7 @@ export function CommandPalette() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Search Pokémon, trainers, and pages…"
+          placeholder="Search Pokémon, moves, trainers, and pages…"
           aria-label="Command palette search"
           autoFocus
           className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
