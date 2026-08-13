@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../lib/api';
+import { useCurrentUser } from '../lib/useCurrentUser';
 import { Button } from './ui';
 
 /** Composer for a new note on a given Pokémon. Calls `onSaved` after a write. */
@@ -7,6 +8,9 @@ export function NoteComposer({ pokemonId, onSaved }: { pokemonId: number; onSave
   const [body, setBody] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Attribution rides along as a header (see lib/api.ts); this only names it,
+  // so nobody writes a note without seeing whose it will be.
+  const { user, email } = useCurrentUser();
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -38,7 +42,10 @@ export function NoteComposer({ pokemonId, onSaved }: { pokemonId: number; onSave
         className="w-full resize-y rounded-md border border-hairline bg-surface px-3 py-2 text-sm text-ink outline-none placeholder:text-muted focus:border-brand focus:ring-1 focus:ring-brand"
       />
       {error && <p className="text-xs text-status-critical">{error}</p>}
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs text-muted">
+          Writing as <span className="font-medium text-ink">{user?.name ?? email ?? '—'}</span>
+        </p>
         <Button type="submit" variant="primary" disabled={saving || !body.trim()}>
           {saving ? 'Saving…' : 'Add note'}
         </Button>

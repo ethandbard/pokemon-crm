@@ -85,7 +85,7 @@ Four steps in order, each safe to re-run on its own:
 | 1 | `npm run db:create` | Creates the `pokemon_crm` database if it isn't there |
 | 2 | `npm run db:migrate` | Applies the migrations in `server/drizzle/` |
 | 3 | `npm run seed` | Imports the Pokédex from [PokeAPI](https://pokeapi.co) |
-| 4 | `npm run seed:trainers` | Creates the demo trainers, rosters, and review history |
+| 4 | `npm run seed:trainers` | Creates the demo users, trainers, rosters, and review history |
 
 Step 3 takes 5–8 minutes — roughly 3,500 requests for 1,025 Pokémon, their
 species records, 541 evolution chains, 6 growth-rate curves, 797 moves, and 33
@@ -129,6 +129,7 @@ Web at http://localhost:5173, API at http://localhost:4000.
 | `npm run db:studio` | Open Drizzle Studio |
 | `npm run seed` | Import Pokémon from PokeAPI (idempotent) |
 | `npm run seed:trainers` | Create trainers and rosters (idempotent; run after `seed`) |
+| `npm run seed:users` | Create the demo users behind the "acting as" switcher (idempotent) |
 
 ## Where the data comes from
 

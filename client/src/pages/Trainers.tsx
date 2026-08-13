@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { api, toQueryString } from '../lib/api';
 import { useApi, useDebounced, usePageClamp } from '../lib/useApi';
+import { useCurrentUser } from '../lib/useCurrentUser';
 import type { RosterMember, TrainerDashboardResponse, TrainerListItem } from '../lib/types';
 import { TrainerForm } from '../components/TrainerForm';
 import { AddRosterMember, EditRosterMember } from '../components/RosterEditor';
@@ -242,6 +243,8 @@ function TrainerDashboard({
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [rosterView, setRosterView] = useState<'table' | 'board'>('table');
+  // The two history tables show raw `owner` emails otherwise.
+  const { labelFor } = useCurrentUser();
 
   if (loading && !data) return <Loading label="Loading roster…" />;
   if (error) return <ErrorState message={error} onRetry={refetch} />;
@@ -780,7 +783,9 @@ function TrainerDashboard({
                       </Link>
                     </td>
                     <td className="px-2 py-2 text-ink">{note.body}</td>
-                    <td className="px-2 py-2 whitespace-nowrap text-muted">{note.owner}</td>
+                    <td className="px-2 py-2 whitespace-nowrap text-muted" title={note.owner}>
+                      {labelFor(note.owner)}
+                    </td>
                     <td className="px-2 py-2 whitespace-nowrap text-muted">
                       {formatDate(note.createdAt)}
                     </td>
@@ -870,7 +875,9 @@ function TrainerDashboard({
                           {meta.label}
                         </span>
                       </td>
-                      <td className="px-2 py-2 whitespace-nowrap text-muted">{entry.owner}</td>
+                      <td className="px-2 py-2 whitespace-nowrap text-muted" title={entry.owner}>
+                        {labelFor(entry.owner)}
+                      </td>
                       <td className="px-2 py-2 whitespace-nowrap text-muted">
                         {formatDate(entry.createdAt)}
                       </td>

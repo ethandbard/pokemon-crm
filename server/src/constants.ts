@@ -1,9 +1,26 @@
 /**
- * Every write is attributed to this owner until real auth exists. The `owner`
- * columns are already in place, so swapping this for a session user is a
- * change to the route handlers only — no migration.
+ * Fallback attribution for a write that names no acting user — an API call with
+ * no `X-Acting-User` header and no `owner` in the body. The switcher normally
+ * supplies one; see `ownerFor` in `owner.ts`.
+ *
+ * Also the email of the seeded user this row belongs to, so the fallback is a
+ * real person in the directory rather than an orphan string.
  */
 export const DEFAULT_OWNER = 'demo@pokemon-crm.local';
+
+/**
+ * The starting user directory, written by `seed:users`.
+ *
+ * Demo identities, not accounts: there is no password anywhere in this app.
+ * The first entry is DEFAULT_OWNER and must stay in this list, or unattributed
+ * writes land under an email with no matching user row.
+ */
+export const SEED_USERS = [
+  { email: DEFAULT_OWNER, name: 'Demo Advisor', role: 'Advisor', initials: 'DA' },
+  { email: 'oak@pokemon-crm.local', name: 'Professor Oak', role: 'Professor', initials: 'PO' },
+  { email: 'juniper@pokemon-crm.local', name: 'Professor Juniper', role: 'Professor', initials: 'PJ' },
+  { email: 'nurse.joy@pokemon-crm.local', name: 'Nurse Joy', role: 'Care', initials: 'NJ' },
+] as const;
 
 /**
  * Needs-attention scoring — the early-alert model.

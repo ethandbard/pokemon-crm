@@ -16,6 +16,7 @@ import {
 import { PageHeader } from '../components/PageHeader';
 import { NoteActions } from '../components/NoteEditor';
 import { SavedViews } from '../components/SavedViews';
+import { useCurrentUser } from '../lib/useCurrentUser';
 import { dexNumber, formatDate } from '../lib/format';
 
 const SORT_OPTIONS = [
@@ -37,6 +38,7 @@ export function NotesPage() {
   const [page, setPage] = useState(1);
 
   const debouncedSearch = useDebounced(search);
+  const { email: actingEmail, labelFor } = useCurrentUser();
 
   const path = useMemo(
     () =>
@@ -84,15 +86,33 @@ export function NotesPage() {
             setOwner(e.target.value);
             setPage(1);
           }}
-          aria-label="Filter by owner"
+          aria-label="Filter by author"
         >
-          <option value="">All owners</option>
+          <option value="">All authors</option>
           {data?.owners.map((o) => (
             <option key={o} value={o}>
-              {o}
+              {labelFor(o)}
+              {o === actingEmail ? ' (me)' : ''}
             </option>
           ))}
         </Select>
+
+        {/*
+         * "Mine" is the one owner filter worth a click rather than a dropdown
+         * hunt — it's the question you ask most, and it re-answers itself when
+         * you switch user.
+         */}
+        <Button
+          onClick={() => {
+            setOwner(owner === actingEmail ? '' : (actingEmail ?? ''));
+            setPage(1);
+          }}
+          variant={owner && owner === actingEmail ? 'primary' : 'secondary'}
+          aria-pressed={Boolean(owner) && owner === actingEmail}
+          disabled={!actingEmail}
+        >
+          Only mine
+        </Button>
 
         <Select
           value={trainerId}
@@ -212,7 +232,8 @@ export function NotesPage() {
                       <p className="whitespace-pre-wrap text-sm text-ink">{note.body}</p>
                       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs text-muted">
-                          {note.owner} · created {formatDate(note.createdAt)}
+                          <span title={note.owner}>{labelFor(note.owner)}</span> · created{' '}
+                          {formatDate(note.createdAt)}
                           {note.updatedAt !== note.createdAt &&
                             ` · updated ${formatDate(note.updatedAt)}`}
                         </p>

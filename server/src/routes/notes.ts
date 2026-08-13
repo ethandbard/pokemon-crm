@@ -4,7 +4,7 @@ import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { notes, pokemon, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
-import { DEFAULT_OWNER } from '../constants.js';
+import { ownerFor } from '../owner.js';
 
 export const notesRouter = Router();
 
@@ -90,7 +90,7 @@ notesRouter.get(
 const createSchema = z.object({
   pokemonId: z.number().int().min(1),
   body: z.string().trim().min(1, 'Note cannot be empty').max(5000),
-  // Optional today; becomes the session user once auth lands.
+  // Optional: the acting user normally arrives as a header. See owner.ts.
   owner: z.string().trim().min(1).max(200).optional(),
 });
 
@@ -112,7 +112,7 @@ notesRouter.post(
       .values({
         pokemonId: input.pokemonId,
         body: input.body,
-        owner: input.owner ?? DEFAULT_OWNER,
+        owner: ownerFor(req, input.owner),
       })
       .returning();
 
@@ -143,13 +143,14 @@ notesRouter.post(
       );
     }
 
+    const owner = ownerFor(req, input.owner);
     const created = await db
       .insert(notes)
       .values(
         input.pokemonIds.map((pokemonId) => ({
           pokemonId,
           body: input.body,
-          owner: input.owner ?? DEFAULT_OWNER,
+          owner,
         })),
       )
       .returning({ id: notes.id });

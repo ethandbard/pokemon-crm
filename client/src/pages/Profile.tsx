@@ -29,6 +29,7 @@ import { Movepool } from '../components/Movepool';
 import { PokemonQuickSearch } from '../components/PokemonQuickSearch';
 import { EvolutionChain } from '../components/EvolutionProgress';
 import { useToast } from '../components/Toast';
+import { useCurrentUser } from '../lib/useCurrentUser';
 import {
   ACTIVITY_META,
   ROSTER_STATUS_META,
@@ -74,11 +75,19 @@ export function ProfilePage() {
   const [optimisticKinds, setOptimisticKinds] = useState<Partial<Record<ActivityKind, boolean>>>({});
   const [showShiny, setShowShiny] = useState(false);
   const { toast, confirmable } = useToast();
+  const { email: actingEmail, labelFor } = useCurrentUser();
 
   // Once fresh data arrives the optimistic layer has served its purpose.
   useEffect(() => {
     setOptimisticKinds({});
   }, [data]);
+
+  // Switching user changes which flags are "yours", and the toggles read from
+  // the fetched rows — so the profile has to be re-read, not just re-rendered.
+  useEffect(() => {
+    setOptimisticKinds({});
+    refetch();
+  }, [actingEmail, refetch]);
 
   // Navigating between Pokémon keeps the component mounted, so the shiny
   // toggle has to be reset explicitly or it carries over to the next species.
@@ -105,13 +114,21 @@ export function ProfilePage() {
   if (!data) return null;
 
   const { pokemon, notes, activity, neighbours, ranking, trainers, evolution, moveSummary } = data;
+  /*
+   * The toggle buttons are **your** flags, not the workspace's: the API toggles
+   * a row keyed on (pokemon, owner, kind), so showing another user's flag as
+   * "on" would make the first click appear to do nothing. The activity log
+   * below still lists everyone's — that history is deliberately shared.
+   */
+  const myActivity = activity.filter((a) => a.owner === actingEmail);
+  const actingUserLabel = actingEmail ? labelFor(actingEmail) : 'the default user';
   // Server truth, overlaid with any in-flight optimistic toggles.
-  const activeKinds = new Set(activity.map((a) => a.kind));
+  const activeKinds = new Set(myActivity.map((a) => a.kind));
   for (const [kind, isActive] of Object.entries(optimisticKinds)) {
     if (isActive) activeKinds.add(kind as ActivityKind);
     else activeKinds.delete(kind as ActivityKind);
   }
-  const lastReviewed = activity.find((a) => a.kind === 'reviewed')?.updatedAt ?? null;
+  const lastReviewed = myActivity.find((a) => a.kind === 'reviewed')?.updatedAt ?? null;
 
   const statData = STAT_FIELDS.map((field) => ({
     label: field.label,
@@ -175,14 +192,23 @@ export function ProfilePage() {
   /**
    * Removes a log entry. No confirm dialog — the toast offers Undo, which
    * re-toggles the flag back on.
+   *
+   * The log holds every user's flags, so Undo restores the entry to the person
+   * who set it by naming `owner` explicitly; left to the header it would
+   * silently re-file someone else's flag under the acting user.
    */
-  async function removeActivity(activityId: number, kind: ActivityKind, label: string) {
+  async function removeActivity(
+    activityId: number,
+    kind: ActivityKind,
+    label: string,
+    owner: string,
+  ) {
     setRemovingId(activityId);
     setActivityError(null);
     await confirmable({
       message: `Removed “${label}” from ${pokemon.displayName}`,
       perform: () => api.delete(`/api/activity/${activityId}`),
-      undo: () => api.post('/api/activity/toggle', { pokemonId: pokemon.id, kind }),
+      undo: () => api.post('/api/activity/toggle', { pokemonId: pokemon.id, kind, owner }),
       onSettled: refetch,
       onError: setActivityError,
     });
@@ -334,7 +360,10 @@ export function ProfilePage() {
             </dl>
           </Card>
 
-          <Card title="Status" subtitle="Advising-style flags for this Pokémon">
+          <Card
+            title="Status"
+            subtitle={`Your flags as ${actingUserLabel} — others' appear in the log below`}
+          >
             <div className="flex flex-wrap gap-2">
               {ACTIVITY_ORDER.map((kind) => {
                 const active = activeKinds.has(kind);
@@ -413,7 +442,8 @@ export function ProfilePage() {
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-medium text-ink">{meta.label}</p>
                           <p className="mt-0.5 text-xs text-muted">
-                            {reSet ? 'Updated' : 'Set'} {formatDate(entry.updatedAt)}
+                            {reSet ? 'Updated' : 'Set'} {formatDate(entry.updatedAt)} by{' '}
+                            <span title={entry.owner}>{labelFor(entry.owner)}</span>
                           </p>
                           {reSet && (
                             <p className="text-xs text-muted">
@@ -423,7 +453,9 @@ export function ProfilePage() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => removeActivity(entry.id, entry.kind, meta.label)}
+                          onClick={() =>
+                            removeActivity(entry.id, entry.kind, meta.label, entry.owner)
+                          }
                           disabled={removingId === entry.id}
                           className="shrink-0 text-xs text-muted hover:text-status-critical disabled:opacity-50"
                         >
@@ -686,7 +718,8 @@ export function ProfilePage() {
                       <p className="whitespace-pre-wrap text-sm text-ink">{note.body}</p>
                       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs text-muted">
-                          {note.owner} · {formatDate(note.createdAt)}
+                          <span title={note.owner}>{labelFor(note.owner)}</span> ·{' '}
+                          {formatDate(note.createdAt)}
                           {note.updatedAt !== note.createdAt && ' · edited'}
                         </p>
                         <NoteActions noteId={note.id} body={note.body} onChanged={refetch} />

@@ -4,7 +4,7 @@ import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-o
 import { db } from '../db/client.js';
 import { activity, pokemon, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
-import { DEFAULT_OWNER } from '../constants.js';
+import { ownerFor } from '../owner.js';
 
 export const activityRouter = Router();
 
@@ -126,7 +126,7 @@ activityRouter.post(
   '/toggle',
   asyncHandler(async (req, res) => {
     const input = toggleSchema.parse(req.body);
-    const owner = input.owner ?? DEFAULT_OWNER;
+    const owner = ownerFor(req, input.owner);
 
     const [target] = await db
       .select({ id: pokemon.id })
@@ -181,7 +181,7 @@ activityRouter.post(
   '/bulk',
   asyncHandler(async (req, res) => {
     const input = bulkSchema.parse(req.body);
-    const owner = input.owner ?? DEFAULT_OWNER;
+    const owner = ownerFor(req, input.owner);
 
     const existing = await db
       .select({ id: pokemon.id })

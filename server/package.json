@@ -14,7 +14,8 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "seed": "tsx src/scripts/seed.ts",
-    "seed:trainers": "tsx src/scripts/seed-trainers.ts"
+    "seed:trainers": "tsx src/scripts/seed-trainers.ts",
+    "seed:users": "tsx src/scripts/seed-users.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

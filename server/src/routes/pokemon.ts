@@ -213,9 +213,14 @@ pokemonRouter.get(
           noteCount: sql<number>`(select count(*)::int from ${notes} n where n.pokemon_id = ${pokemon}.id)`,
           /** Distinct moves, not join rows — a move learnable two ways counts once. */
           moveCount: sql<number>`(select count(distinct pm.move_id)::int from ${pokemonMoves} pm where pm.pokemon_id = ${pokemon}.id)`,
+          /**
+           * Which flags exist on this Pokémon at all, across every user —
+           * `distinct` because two people reviewing the same Pokémon is two
+           * rows but one badge.
+           */
           activityKinds: sql<
             string[]
-          >`coalesce((select array_agg(a.kind::text order by a.kind::text) from ${activity} a where a.pokemon_id = ${pokemon}.id), '{}')`,
+          >`coalesce((select array_agg(distinct a.kind::text order by a.kind::text) from ${activity} a where a.pokemon_id = ${pokemon}.id), '{}')`,
           trainerNames: sql<
             string[]
           >`coalesce((select array_agg(t.name order by t.name) from ${roster} r join ${trainers} t on t.id = r.trainer_id where r.pokemon_id = ${pokemon}.id), '{}')`,

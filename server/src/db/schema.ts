@@ -232,9 +232,41 @@ export const pokemon = pgTable(
 );
 
 /**
- * Free-text notes attached to a Pokémon. `owner` exists ahead of auth so that
- * rows written today are still meaningful once real users are introduced —
- * until then everything is written under DEFAULT_OWNER (see constants.ts).
+ * The people who write notes and set status flags — the directory behind the
+ * "acting as" switcher. Not authentication: there is no password or session,
+ * the client simply names which user it is acting as.
+ *
+ * **`users.email` is the value that lands in `notes.owner` / `activity.owner`,
+ * and there is deliberately no foreign key.** Owner columns predate this table
+ * and may hold a string with no matching row (an older seed, a direct API call,
+ * a deleted user); joins to this table must be left joins that fall back to the
+ * raw owner string. Changing a user's email therefore re-attributes nothing —
+ * rename via `name`, which is display-only.
+ */
+export const users = pgTable(
+  'users',
+  {
+    id: serial('id').primaryKey(),
+    /** Stable identity. Written into `owner`; treat as immutable once used. */
+    email: text('email').notNull(),
+    name: text('name').notNull(),
+    /** Free text — "Professor", "Gym Leader". Display only, never branched on. */
+    role: text('role'),
+    /**
+     * Two initials for the switcher's avatar. Derived from `name` at creation
+     * rather than at render so a user can override it.
+     */
+    initials: text('initials'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('users_email_idx').on(table.email)],
+);
+
+/**
+ * Free-text notes attached to a Pokémon. `owner` holds the acting user's email
+ * — see `users` above for why that is a plain string and not a foreign key.
+ * Writes with no acting user fall back to DEFAULT_OWNER (see constants.ts).
  */
 export const notes = pgTable(
   'notes',
@@ -509,6 +541,8 @@ export const activityRelations = relations(activity, ({ one }) => ({
   pokemon: one(pokemon, { fields: [activity.pokemonId], references: [pokemon.id] }),
 }));
 
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
 export type Pokemon = typeof pokemon.$inferSelect;
 export type NewPokemon = typeof pokemon.$inferInsert;
 export type Note = typeof notes.$inferSelect;

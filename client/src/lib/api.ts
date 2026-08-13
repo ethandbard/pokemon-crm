@@ -13,11 +13,29 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Who the app is currently acting as, sent on every request as `X-Acting-User`
+ * and used by the server to attribute notes and status flags.
+ *
+ * Module-level rather than threaded through each call site: attribution applies
+ * to every write, and a header the fetch wrapper always sets cannot be
+ * forgotten at a new one. `CurrentUserProvider` is the only thing that sets it.
+ * **This is not authentication** — nothing verifies the value.
+ */
+let actingUser: string | null = null;
+
+export function setActingUser(email: string | null) {
+  actingUser = email;
+}
+
+export const ACTING_USER_HEADER = 'X-Acting-User';
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
     headers: {
       ...(init?.body ? { 'content-type': 'application/json' } : {}),
+      ...(actingUser ? { [ACTING_USER_HEADER]: actingUser } : {}),
       ...init?.headers,
     },
   });
