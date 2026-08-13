@@ -14,7 +14,15 @@
 import { eq, sql } from 'drizzle-orm';
 import { db, pool } from '../db/client.js';
 import { activity, pokemon, roster, trainers, type RosterStatus } from '../db/schema.js';
-import { DEFAULT_OWNER } from '../constants.js';
+import { SEED_USERS } from '../constants.js';
+import { seedUsers } from './seed-users.js';
+
+/**
+ * Review history is spread across the seeded users rather than all filed under
+ * one, so the per-user filters and the "acting as" switcher have something to
+ * distinguish on a fresh database. Deterministic, like the rest of this script.
+ */
+const SEED_OWNERS = SEED_USERS.map((user) => user.email);
 
 interface RosterSpec {
   /** National Dex number. */
@@ -196,12 +204,13 @@ async function seedReviewHistory() {
     // bucket 1 ? recent (well inside the stale window), bucket 2 ? stale.
     const days = bucket === 1 ? 5 + (Number(row.idx) % 20) : 45 + (Number(row.idx) % 60);
     const when = daysAgo(days);
+    const owner = SEED_OWNERS[Number(row.idx) % SEED_OWNERS.length]!;
 
     await db
       .insert(activity)
       .values({
         pokemonId: row.pokemon_id,
-        owner: DEFAULT_OWNER,
+        owner,
         kind: 'reviewed',
         createdAt: when,
         updatedAt: when,
@@ -213,7 +222,7 @@ async function seedReviewHistory() {
     if (Number(row.idx) % 11 === 0) {
       await db
         .insert(activity)
-        .values({ pokemonId: row.pokemon_id, owner: DEFAULT_OWNER, kind: 'flagged', createdAt: when, updatedAt: when })
+        .values({ pokemonId: row.pokemon_id, owner, kind: 'flagged', createdAt: when, updatedAt: when })
         .onConflictDoNothing();
       flagged += 1;
     }
@@ -232,6 +241,9 @@ async function main() {
   if (count === 0) {
     throw new Error('The pokemon table is empty — run `npm run seed` before seeding trainers.');
   }
+
+  // The review history below is attributed to these users, so they must exist.
+  await seedUsers();
 
   console.log(`[seed:trainers] seeding ${TRAINERS.length} trainers…`);
 

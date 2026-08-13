@@ -418,6 +418,27 @@ export interface PokemonDetail extends PokemonListItem {
   updatedAt: string;
 }
 
+/**
+ * Someone who can be acted as. `email` is the value written into every `owner`
+ * column, which is what makes it the identity rather than `id`.
+ */
+export interface User {
+  id: number;
+  email: string;
+  name: string;
+  role: string | null;
+  initials: string | null;
+  createdAt: string;
+  noteCount: number;
+  activityCount: number;
+}
+
+export interface UsersResponse {
+  data: User[];
+  /** Where writes with no acting user land — see the server's DEFAULT_OWNER. */
+  defaultOwner: string;
+}
+
 export interface Note {
   id: number;
   pokemonId: number;

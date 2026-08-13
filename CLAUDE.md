@@ -45,7 +45,8 @@ pokemon-crm/
 │   └── src/
 │       ├── index.ts          # Express app, route mounting, shutdown
 │       ├── env.ts            # dotenv loading + typed env access
-│       ├── constants.ts      # DEFAULT_OWNER, types, generation buckets, ATTENTION
+│       ├── constants.ts      # DEFAULT_OWNER, SEED_USERS, types, generations, ATTENTION
+│       ├── owner.ts          # resolves who a write is attributed to
 │       ├── attention.ts      # needs-attention scorer
 │       ├── http.ts           # HttpError, asyncHandler, error middleware
 │       ├── db/
@@ -60,10 +61,12 @@ pokemon-crm/
 │       │   ├── attention.ts  # needs-attention queue
 │       │   ├── notes.ts      # cross-Pokémon feed + full CRUD
 │       │   ├── activity.ts   # status flag toggle + feed
-│       │   └── stats.ts      # dashboard aggregations
+│       │   ├── stats.ts      # dashboard aggregations
+│       │   └── users.ts      # the "acting as" directory
 │       └── scripts/
 │           ├── seed.ts       # one-time PokeAPI import (idempotent)
-│           └── seed-trainers.ts # demo trainers, rosters, review history
+│           ├── seed-trainers.ts # demo trainers, rosters, review history
+│           └── seed-users.ts # the demo user directory
 └── client/
     ├── vite.config.ts        # React + Tailwind plugins, /api dev proxy
     └── src/
@@ -83,6 +86,7 @@ pokemon-crm/
         │   ├── AttentionQueue.tsx     # ranked early-alert list with reasons
         │   ├── CommandPalette.tsx     # ⌘K global jump-to
         │   ├── Toast.tsx     # ToastProvider, useToast, confirmable(), useHotkey
+        │   ├── UserSwitcher.tsx # "acting as" control in the sidebar
         │   ├── BulkActionBar.tsx      # multi-select actions on Lookup
         │   ├── RosterBoard.tsx        # drag-and-drop roster status kanban
         │   ├── SavedViews.tsx         # named filter presets
@@ -91,6 +95,7 @@ pokemon-crm/
         │   ├── api.ts        # fetch wrapper, ApiError, toQueryString
         │   ├── useApi.ts     # useApi (fetch + loading/error), useDebounced
         │   ├── useSavedViews.ts # localStorage-backed filter presets
+        │   ├── useCurrentUser.tsx # the acting user + labelFor()
         │   ├── types.ts      # hand-written API response shapes
         │   └── format.ts     # type colors, unit + date formatting
         └── pages/
@@ -202,13 +207,32 @@ because PokeAPI keeps adding methods (`level-up`, `machine`, `egg`, `tutor`,
 - Movepool coverage = distinct types of **non-status** moves. A Grass-type
   status move gives no Grass coverage.
 
+### `users`
+
+The directory behind the "acting as" switcher. **Attribution, not
+authentication** — no passwords, no sessions, no permissions; everyone sees the
+whole workspace.
+
+- **`users.email` is the value stored in `notes.owner` / `activity.owner`, and
+  there is deliberately no foreign key.** Owner columns predate this table and
+  may hold an email with no matching row (an older seed, a direct API call, a
+  deleted user), so any join to `users` must tolerate a miss and fall back to
+  the raw string. `labelFor()` on the client does this.
+- **`email` is immutable** — `PATCH /api/users/:id` rejects it. Changing it
+  would orphan that user's whole history rather than rename it; rename via
+  `name`.
+- **The `DEFAULT_OWNER` user cannot be deleted**: unattributed writes land on it.
+  Deleting any other user leaves their notes and flags in place under the raw
+  email; the response reports how many.
+- `seed:users` writes `SEED_USERS` from `constants.ts` and is called by
+  `seed:trainers`, which spreads its review history across them.
+
 ### `notes`
 
 `pokemon_id` FK (cascade delete), `owner`, `body`, `created_at`, `updated_at`.
 
-Everything is written under `DEFAULT_OWNER` (`server/src/constants.ts`). Adding
-auth means replacing that constant with the session user in the route handlers —
-no migration.
+`owner` holds the acting user's email — see `users` above. Writes that name no
+acting user fall back to `DEFAULT_OWNER` (`server/src/constants.ts`).
 
 ### `trainers` and `roster`
 
@@ -259,6 +283,10 @@ All routes are under `/api`. Responses are JSON; errors are
 | GET | `/api/moves` | Move catalogue — `search`, `type`, `damageClass`, `generation`, `pokemonId`, `trainerId`, `learnMethod`, `minPower`, `maxPower`, `sort`, `direction`, pagination |
 | GET | `/api/moves/filters` | Distinct types/generations/damage classes/learn methods/ailments and the power range |
 | GET | `/api/moves/:id` | Move + paginated learners (`learnMethod`, pagination), learn-method and type breakdowns, and trainers with an active-roster learner |
+| GET | `/api/users` | The whole user directory with per-user note/flag counts, plus `defaultOwner`. Unpaginated: it backs the switcher |
+| POST | `/api/users` | Create a user |
+| PATCH | `/api/users/:id` | Update `name` / `role` / `initials`. **Not `email`** |
+| DELETE | `/api/users/:id` | Remove the identity; their notes and flags stay. Refuses on `DEFAULT_OWNER` |
 | GET | `/api/trainers` | All trainers with roster size and mean BST — `search` (name, region, specialty). Unpaginated: it backs a select control |
 | GET | `/api/attention` | Needs-attention queue — `trainerId` (omit for workspace-wide), `limit`. Returns each item's `score` and `reasons`, plus the `model` constants |
 | POST | `/api/activity/bulk` | Set or clear one flag across many Pokémon (explicit target state, not a toggle) |
@@ -282,6 +310,12 @@ All routes are under `/api`. Responses are JSON; errors are
 
 ### Conventions
 
+- **Attribution comes from `ownerFor(req, body.owner)`** (`server/src/owner.ts`),
+  never from `DEFAULT_OWNER` directly. It reads the `X-Acting-User` header the
+  client sets, letting an explicit `owner` in the body win so a caller can
+  attribute deliberately — which is what Undo on someone else's status flag
+  relies on. **Nothing verifies the header.** Real auth replaces the body of
+  this one function; no route handler changes.
 - **Parameterised queries only.** Never build SQL by string concatenation or
   template interpolation of user input. Use the Drizzle query builder, or
   Drizzle's `` sql`` `` tag — its `${}` holes become bound parameters.
@@ -426,6 +460,25 @@ Two seeding dependencies, both of which silently disable signals if lost:
   member. `seed:trainers` reviews two thirds of roster Pokémon, but only those
   with **no** activity rows, so hand-set flags are never overwritten.
 
+### The acting user
+
+`lib/useCurrentUser.tsx` holds it; `components/UserSwitcher.tsx` is the control
+at the foot of the sidebar.
+
+- **The choice is an email in localStorage**, restored before the first request
+  so a write is never mis-filed while the directory loads. An unknown or absent
+  email falls back to the API's `defaultOwner`.
+- **`setActingUser()` in `lib/api.ts` puts it on every request as
+  `X-Acting-User`.** Write call sites don't pass an owner, so a new one cannot
+  forget to attribute. Pass `owner` in the body only to attribute to someone
+  *other* than the acting user (see the Profile's activity Undo).
+- **Use `labelFor(owner)` to render any owner string**, never the raw column —
+  it resolves an email to a display name and falls back to the email itself.
+- **Anything showing "your" state must filter on the acting email and refetch
+  when it changes.** The Profile's status toggles do both: the API keys a flag
+  on (pokemon, owner, kind), so rendering another user's flag as on would make
+  the first click look like a no-op.
+
 ### Status flags: three views of one table
 
 - **Profile → Status** — toggle buttons. Setting a flag inserts a row; unsetting
@@ -475,7 +528,7 @@ CREATE DATABASE; without it `db:migrate` fails on a fresh machine with
 `database "pokemon_crm" does not exist`. See README for the first-run
 walkthrough.
 
-Other scripts: `npm run db:generate` (new migration from schema changes),
+Other scripts: `npm run seed:users`, `npm run db:generate` (new migration from schema changes),
 `npm run db:push` (dev-only direct sync), `npm run db:studio`,
 `npm run typecheck`, `npm run build`.
 
@@ -485,6 +538,11 @@ Other scripts: `npm run db:generate` (new migration from schema changes),
   config as CJS, which can't load the ESM-only `env.ts` (`import.meta.url`). The
   config reads `.env` directly. An env var both need must be added in both
   places.
+- **The scrolling `<main>` in `App.tsx` must stay `relative`.** `.sr-only` is
+  `position: absolute`, so without a positioned ancestor those elements resolve
+  against the document, sit outside `main`'s overflow clipping, and stretch
+  `<html>` to the full content height — a second scrollbar and empty scroll
+  space past the end of the page. Same applies to any new scroll pane.
 - **A native `<dialog>` needs `m-auto` under Tailwind**, whose preflight resets
   the `margin: auto` that centres it. `components/Modal.tsx` sets it.
 - **Closed modals stay mounted.** Pages render `<Modal open={false}>` rather than
@@ -519,7 +577,8 @@ Other scripts: `npm run db:generate` (new migration from schema changes),
 - **build** — `npm ci`, `typecheck`, `build`, on Node 20 (the `engines` floor)
   and 22. `fail-fast` is off.
 - **migrations** — spins up a Postgres 16 service, runs `db:create` and
-  `db:migrate` **twice each**, and asserts all eight tables exist.
+  `db:migrate` **twice each**, and asserts all nine tables exist. Adding a table
+  means adding it to that list.
 
 **CI does not seed** — that would be ~2,600 PokéAPI requests per push, against
 their fair use policy. The seed is verified locally.
@@ -541,5 +600,5 @@ proxy that forwards `/api` to the Express server.
 
 ## Not yet built
 
-See [TODO.md](TODO.md). In short: no auth (`owner` is one hardcoded constant),
-no tests, no dark mode, and a single ~720 kB JS chunk.
+See [TODO.md](TODO.md). In short: no auth (users are an unverified "acting as"
+switcher — see § `users`), no tests, no dark mode, and a single ~720 kB JS chunk.

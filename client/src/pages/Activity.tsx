@@ -16,6 +16,7 @@ import {
 } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
 import { SavedViews } from '../components/SavedViews';
+import { useCurrentUser } from '../lib/useCurrentUser';
 import { ACTIVITY_META, dexNumber, formatDate } from '../lib/format';
 
 /** Sortable columns, keyed to the API's `sort` allow-list. */
@@ -24,7 +25,7 @@ const COLUMNS = [
   { key: 'pokemon', label: 'Pokémon', align: 'left' },
   { key: null, label: 'Types', align: 'left' },
   { key: 'kind', label: 'Status', align: 'left' },
-  { key: 'owner', label: 'Owner', align: 'left' },
+  { key: 'owner', label: 'Set by', align: 'left' },
   { key: 'createdAt', label: 'Set', align: 'left' },
   { key: 'updatedAt', label: 'Last updated', align: 'left' },
   { key: null, label: '', align: 'right' },
@@ -45,6 +46,7 @@ export function ActivityPage() {
   const [actionError, setActionError] = useState<string | null>(null);
 
   const debouncedSearch = useDebounced(search);
+  const { email: actingEmail, labelFor } = useCurrentUser();
 
   const path = useMemo(
     () =>
@@ -146,15 +148,30 @@ export function ActivityPage() {
             setOwner(e.target.value);
             setPage(1);
           }}
-          aria-label="Filter by owner"
+          aria-label="Filter by who set the flag"
         >
-          <option value="">All owners</option>
+          <option value="">Everyone</option>
           {(data?.owners ?? []).map((o) => (
             <option key={o} value={o}>
-              {o}
+              {labelFor(o)}
+              {o === actingEmail ? ' (me)' : ''}
             </option>
           ))}
         </Select>
+
+        {/* Same shortcut as the Notes page — "what have I flagged" is the
+            question the owner filter is usually asked. */}
+        <Button
+          onClick={() => {
+            setOwner(owner === actingEmail ? '' : (actingEmail ?? ''));
+            setPage(1);
+          }}
+          variant={owner && owner === actingEmail ? 'primary' : 'secondary'}
+          aria-pressed={Boolean(owner) && owner === actingEmail}
+          disabled={!actingEmail}
+        >
+          Only mine
+        </Button>
 
         <Select
           value={trainerId}
@@ -309,7 +326,9 @@ export function ActivityPage() {
                             {meta.label}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-muted">{row.owner}</td>
+                        <td className="px-3 py-2 text-muted" title={row.owner}>
+                          {labelFor(row.owner)}
+                        </td>
                         <td className="px-3 py-2 text-muted">{formatDate(row.createdAt)}</td>
                         <td className="px-3 py-2 text-muted">
                           {formatDate(row.updatedAt)}

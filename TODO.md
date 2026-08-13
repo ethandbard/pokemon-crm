@@ -1,6 +1,6 @@
 # TODO
 
-Items 1, 2, 3a, 3c, 4 and 5 are done. 3b is the live backlog.
+Items 1, 2, 3a, 3c, 4, 5 and 6 are done. 3b is the live backlog.
 
 ---
 
@@ -112,6 +112,27 @@ habitat, egg group, growth rate and a BST range, and scopes **every**
 aggregation through one `scope` subquery. The response carries `scope.filtered`
 vs `scope.total` so the page states its own coverage.
 
+## ✅ 6. Multiple users — DONE
+
+Migration `0006_flimsy_smiling_tiger.sql` adds `users`; `seed:users` fills it.
+`owner` columns were already in place, so nothing needed backfilling.
+
+- `ownerFor` (`server/src/owner.ts`) resolves every write's attribution from the
+  `X-Acting-User` header, with an explicit body `owner` overriding it.
+- `UserSwitcher` in the sidebar, backed by `lib/useCurrentUser.tsx`; the choice
+  is an email in localStorage.
+- Notes and Activity render display names and gained an "Only mine" filter; the
+  Profile's status toggles are now per-user, with the activity log staying
+  shared.
+
+Still open:
+
+- **Nothing is verified** — see the auth gap below.
+- **Anyone can edit or delete anyone's note.** With no auth there is nothing to
+  enforce it with; the UI doesn't distinguish yours from theirs.
+- Existing rows seeded before this landed stay under `DEFAULT_OWNER`; only newly
+  seeded review history spreads across users.
+
 ---
 
 ## Known gaps (not yet scheduled)
@@ -121,8 +142,9 @@ vs `scope.total` so the page states its own coverage.
   first suite: the aggregation endpoints (`/api/stats/dashboard`,
   `/api/trainers/:id`, `/api/attention`, `/api/moves/:id`) asserted against a
   known seeded fixture.
-- **`owner` is hardcoded** to `DEFAULT_OWNER`. An "acting as" switcher would
-  exercise the multi-advisor shape before real auth lands.
+- **No authentication.** The `users` table and "acting as" switcher (item 6
+  below) attribute writes but verify nothing — the acting user is a header the
+  client sets. Real auth means sessions and a check in `ownerFor`.
 - **Single ~720 kB JS chunk.** Route-level `React.lazy` would split Recharts out
   of the pages that don't chart.
 - **No dark mode.** Tokens are centralised in `index.css` if it comes back.

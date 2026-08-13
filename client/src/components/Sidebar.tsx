@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { UserSwitcher } from './UserSwitcher';
 
 interface NavItem {
   to: string;
@@ -150,6 +151,9 @@ export function Sidebar() {
           </span>
         </NavLink>
       ))}
+
+      {/* Pinned to the foot of the rail — who you are writing as is always visible. */}
+      <UserSwitcher />
     </nav>
   );
 }
