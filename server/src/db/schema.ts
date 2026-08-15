@@ -447,6 +447,37 @@ export const growthRates = pgTable(
 );
 
 /**
+ * The type effectiveness matrix, from PokeAPI's `/type/{name}.damage_relations`
+ * — 18 requests, written only by the seed.
+ *
+ * **The full 18 × 18 grid is stored, not just the non-neutral pairs.** PokeAPI
+ * reports only the exceptions (what a type is strong or weak against), leaving
+ * neutral implied by absence. Storing it that way makes every consumer coalesce
+ * a missing row to 1×, and a join that quietly drops a pair reads as an immunity
+ * rather than as a bug. 324 rows is nothing; the completeness is worth more.
+ *
+ * `multiplier` is **hundredths**: 0, 50, 100, 200. Integers because the values
+ * are exact and get multiplied together for dual types (a 4× weakness is
+ * 200 × 200 / 100), and floating-point 0.5s accumulating into a 0.24999 that
+ * fails an `= 25` check is a pointless risk for a fixed four-value scale.
+ */
+export const typeDamage = pgTable(
+  'type_damage',
+  {
+    /** The type of the incoming move. */
+    attackingType: text('attacking_type').notNull(),
+    /** One of the defender's types — combine the rows for a dual type. */
+    defendingType: text('defending_type').notNull(),
+    /** Hundredths: 0 (immune), 50 (resists), 100 (neutral), 200 (weak). */
+    multiplier: integer('multiplier').notNull().default(100),
+  },
+  (table) => [
+    uniqueIndex('type_damage_pair_idx').on(table.attackingType, table.defendingType),
+    index('type_damage_defending_idx').on(table.defendingType),
+  ],
+);
+
+/**
  * Where a roster member sits in the trainer's line-up. The advising analogue of
  * an active/inactive caseload: `retired` keeps the history without counting
  * toward the working roster.
@@ -559,3 +590,5 @@ export type NewMove = typeof moves.$inferInsert;
 export type MoveDamageClass = (typeof moveDamageClass.enumValues)[number];
 export type PokemonMove = typeof pokemonMoves.$inferSelect;
 export type NewPokemonMove = typeof pokemonMoves.$inferInsert;
+export type TypeDamage = typeof typeDamage.$inferSelect;
+export type NewTypeDamage = typeof typeDamage.$inferInsert;

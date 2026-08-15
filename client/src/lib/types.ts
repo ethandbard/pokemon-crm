@@ -359,6 +359,13 @@ export interface EvolutionRequirement {
   turnUpsideDown?: boolean;
 }
 
+/** One attacking type and what it does to a defender, in hundredths. */
+export interface TypeMatchup {
+  type: string;
+  /** 0, 25, 50, 200 or 400. Neutral (100) matchups are never returned. */
+  multiplier: number;
+}
+
 /** Full record from the `pokemon` table. */
 export interface PokemonDetail extends PokemonListItem {
   baseExperience: number | null;
@@ -499,6 +506,16 @@ export interface PokemonProfileResponse {
   /** The full movepool, level-up moves first in level order. */
   moves: MovepoolEntry[];
   moveSummary: MoveSummary | null;
+  /**
+   * Defensive matchups, computed server-side from the type chart. Neutral
+   * types are omitted from all three lists — they are most of the 18 and say
+   * nothing. `multiplier` is hundredths: 25, 50, 200, 400.
+   */
+  matchups: {
+    weaknesses: TypeMatchup[];
+    resistances: TypeMatchup[];
+    immunities: TypeMatchup[];
+  };
   neighbours: {
     previous: { id: number; displayName: string; spriteUrl: string | null } | null;
     next: { id: number; displayName: string; spriteUrl: string | null } | null;

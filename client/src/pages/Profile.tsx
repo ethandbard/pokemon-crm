@@ -13,7 +13,7 @@ import {
 } from 'recharts';
 import { useApi } from '../lib/useApi';
 import { api, toQueryString } from '../lib/api';
-import type { ActivityKind, PokemonProfileResponse } from '../lib/types';
+import type { ActivityKind, PokemonProfileResponse, TypeMatchup } from '../lib/types';
 import {
   Button,
   Card,
@@ -34,6 +34,7 @@ import {
   ACTIVITY_META,
   ROSTER_STATUS_META,
   dexNumber,
+  effectivenessLabel,
   formatDate,
   formatGenderRate,
   formatHeight,
@@ -64,6 +65,31 @@ const EV_FIELDS = [
   { key: 'evSpecialDefense', label: 'Sp. Def' },
   { key: 'evSpeed', label: 'Speed' },
 ] as const;
+
+/**
+ * One row of the matchup card. Renders nothing when the list is empty, so a
+ * Pokémon with no immunities simply has no "Immune to" heading rather than a
+ * heading over a blank.
+ */
+function MatchupGroup({ label, matchups }: { label: string; matchups: TypeMatchup[] }) {
+  if (matchups.length === 0) return null;
+
+  return (
+    <div>
+      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">{label}</h3>
+      <ul className="flex flex-wrap gap-1.5">
+        {matchups.map((matchup) => (
+          <li key={matchup.type} className="flex items-center gap-1">
+            <TypeBadge type={matchup.type} />
+            <span className="text-xs tabular-nums text-muted">
+              {effectivenessLabel(matchup.multiplier)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function ProfilePage() {
   const { id } = useParams<{ id: string }>();
@@ -114,7 +140,15 @@ export function ProfilePage() {
 
   if (!data) return null;
 
-  const { pokemon, notes, activity, neighbours, ranking, trainers, evolution, moveSummary } = data;
+  const { pokemon, notes, activity, neighbours, ranking, trainers, evolution, moveSummary, matchups } =
+    data;
+
+  // "as Fire / Flying" — the matchups follow from the type combination, so the
+  // card names it rather than making the reader look back up the page.
+  const typeLabel = [pokemon.type1, pokemon.type2]
+    .filter(Boolean)
+    .map((type) => titleCase(type as string))
+    .join(' / ');
   /*
    * The toggle buttons are **your** flags, not the workspace's: the API toggles
    * a row keyed on (pokemon, owner, kind), so showing another user's flag as
@@ -447,6 +481,28 @@ export function ProfilePage() {
                   );
                 })}
               </ul>
+            )}
+          </Card>
+
+          {/* Defensive matchups only — what this Pokémon TAKES. What it can
+              hit back with is a movepool question, answered by the movepool
+              card's coverage figure rather than by its types. */}
+          <Card
+            title="Type matchups"
+            subtitle={`Damage taken as ${typeLabel}`}
+          >
+            {matchups.weaknesses.length === 0 &&
+            matchups.resistances.length === 0 &&
+            matchups.immunities.length === 0 ? (
+              <p className="text-sm text-muted">
+                Neutral against all 18 types — no weaknesses or resistances.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                <MatchupGroup label="Weak to" matchups={matchups.weaknesses} />
+                <MatchupGroup label="Resists" matchups={matchups.resistances} />
+                <MatchupGroup label="Immune to" matchups={matchups.immunities} />
+              </div>
             )}
           </Card>
 

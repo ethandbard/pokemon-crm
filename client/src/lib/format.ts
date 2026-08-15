@@ -34,6 +34,27 @@ export function typeColor(type: string): string {
 /** The 18 canonical types, for form selects that can't wait on a fetch. */
 export const POKEMON_TYPE_NAMES = Object.keys(TYPE_COLORS);
 
+/**
+ * A type-effectiveness multiplier as players write it. The API sends
+ * hundredths (see `TypeMatchup`), so 200 reads as "2×" and 50 as "½×".
+ */
+export function effectivenessLabel(multiplier: number): string {
+  switch (multiplier) {
+    case 0:
+      return 'No effect';
+    case 25:
+      return '¼×';
+    case 50:
+      return '½×';
+    case 200:
+      return '2×';
+    case 400:
+      return '4×';
+    default:
+      return `${multiplier / 100}×`;
+  }
+}
+
 export const STAT_LABELS = {
   hp: 'HP',
   attack: 'Attack',

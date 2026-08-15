@@ -5,6 +5,7 @@ import { db } from '../db/client.js';
 import { activity, moves, notes, pokemon, pokemonMoves, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
 import { POKEMON_TYPES, REGIONS, REGION_POKEDEXES } from '../constants.js';
+import { defensiveProfile, loadTypeChart } from '../effectiveness.js';
 
 export const pokemonRouter = Router();
 
@@ -444,6 +445,10 @@ pokemonRouter.get(
       })
       .from(pokemon);
 
+    // Defensive matchups. Computed here rather than shipped as a matrix — see
+    // effectiveness.ts. Neutral types are omitted from all three lists.
+    const matchups = defensiveProfile(await loadTypeChart(), record.type1, record.type2);
+
     res.json({
       pokemon: record,
       notes: noteRows,
@@ -451,6 +456,7 @@ pokemonRouter.get(
       trainers: trainerRows,
       moves: moveRows,
       moveSummary: moveSummary.rows[0] ?? null,
+      matchups,
       evolution: {
         chain: chainRows,
         stage: record.evolutionStage,

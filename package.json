@@ -22,6 +22,7 @@
     "seed": "npm run seed --workspace server",
     "seed:trainers": "npm run seed:trainers --workspace server",
     "seed:users": "npm run seed:users --workspace server",
+    "seed:types": "npm run seed:types --workspace server",
     "typecheck": "npm run typecheck --workspace server && npm run typecheck --workspace client"
   },
   "engines": {

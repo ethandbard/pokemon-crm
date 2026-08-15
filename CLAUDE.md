@@ -48,6 +48,7 @@ pokemon-crm/
 │       ├── constants.ts      # DEFAULT_OWNER, SEED_USERS, types, generations, ATTENTION
 │       ├── owner.ts          # resolves who a write is attributed to
 │       ├── attention.ts      # needs-attention scorer
+│       ├── effectiveness.ts  # type chart cache + defensive matchups
 │       ├── http.ts           # HttpError, asyncHandler, error middleware
 │       ├── db/
 │       │   ├── schema.ts     # Drizzle table definitions (source of truth)
@@ -65,6 +66,8 @@ pokemon-crm/
 │       │   └── users.ts      # the "acting as" directory
 │       └── scripts/
 │           ├── seed.ts       # one-time PokeAPI import (idempotent)
+│           ├── pokeapi.ts    # shared PokeAPI client: fetchJson, concurrency cap
+│           ├── seed-types.ts # the 18-request type effectiveness matrix
 │           ├── seed-trainers.ts # demo trainers, rosters, review history
 │           └── seed-users.ts # the demo user directory
 └── client/
@@ -208,6 +211,24 @@ because PokeAPI keeps adding methods (`level-up`, `machine`, `egg`, `tutor`,
 - Movepool coverage = distinct types of **non-status** moves. A Grass-type
   status move gives no Grass coverage.
 
+### `type_damage`
+
+The type effectiveness matrix, from `/type/{name}` — 18 requests, written only
+by the seed (`npm run seed:types` refreshes it without a full dex import).
+
+- **The full 18 × 18 grid is stored (324 rows), not just the non-neutral pairs.**
+  PokeAPI reports only the exceptions. Storing it that way makes every consumer
+  coalesce a missing row to 1×, and a join that drops a pair then reads as an
+  immunity rather than as a bug.
+- **`multiplier` is hundredths** — 0, 50, 100, 200 — because dual types multiply
+  (a 4× weakness is `200 × 200 / 100`) and the scale has exactly four values.
+- **Only the offensive lists (`..._to`) are read** when seeding. PokeAPI reports
+  every relation twice, once from each side; applying both writes each cell
+  twice with no tiebreak if they ever disagree.
+- **All 18 types must fetch successfully or nothing is written.** A missing
+  attacker leaves its row at the 100 default, which reads as "hits everything
+  neutrally" — wrong, and plausible-looking.
+
 ### `users`
 
 The directory behind the "acting as" switcher. **Attribution, not
@@ -280,7 +301,7 @@ All routes are under `/api`. Responses are JSON; errors are
 | GET | `/api/health` | Liveness + DB round trip |
 | GET | `/api/pokemon` | List — `search`, `type`, `generation`, `legendary`, `activity`, `trainerId`, `minBaseStatTotal`, `maxBaseStatTotal`, `region`, `habitat`, `shape`, `eggGroup`, `growthRate`, `evYield`, `baby`, `moveId`, `learnMethod`, `moveType`, `sort`, `direction`, `page`, `pageSize` |
 | GET | `/api/pokemon/filters` | Distinct types/generations/flags/trainers/habitats/shapes/egg groups/growth rates/learn methods for dropdowns, plus the static region list |
-| GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, full movepool, movepool summary, dex neighbours, BST percentile |
+| GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, full movepool, movepool summary, defensive `matchups`, dex neighbours, BST percentile |
 | GET | `/api/moves` | Move catalogue — `search`, `type`, `damageClass`, `generation`, `pokemonId`, `trainerId`, `learnMethod`, `minPower`, `maxPower`, `sort`, `direction`, pagination |
 | GET | `/api/moves/filters` | Distinct types/generations/damage classes/learn methods/ailments and the power range |
 | GET | `/api/moves/:id` | Move + paginated learners (`learnMethod`, pagination), learn-method and type breakdowns, and trainers with an active-roster learner |
@@ -464,6 +485,25 @@ Consequences worth knowing:
 - "Most widely learned moves" counts learners **within the scope** rather than
   reading `moves.learned_by_count`, which is dex-wide.
 
+### Type effectiveness
+
+`server/src/effectiveness.ts`. Same split as `attention.ts`: **SQL fetches the
+324-row chart, TypeScript does the arithmetic.**
+
+- **The chart never leaves the server.** Callers get conclusions — what a species
+  is weak to — not the matrix. `/api/pokemon/:id` returns `matchups` with
+  `weaknesses` / `resistances` / `immunities`, worst-first and best-first
+  respectively.
+- **Neutral matchups are omitted** from all three lists. They are most of the 18
+  and carry no signal.
+- The matrix is **loaded once and cached** for the life of the process. A
+  rejection is not cached, so a first call before the seed has run can be
+  retried; `resetTypeChart()` drops it.
+- **An unknown type contributes a neutral 100, never a 0** — an absent row must
+  not read as an immunity.
+- Multipliers stay hundredths end to end; `effectivenessLabel` in
+  `lib/format.ts` renders them (`200` → "2×", `50` → "½×", `0` → "No effect").
+
 ### Needs-attention scoring
 
 `server/src/attention.ts`. **SQL gathers facts, TypeScript applies weights.**
@@ -555,7 +595,8 @@ CREATE DATABASE; without it `db:migrate` fails on a fresh machine with
 `database "pokemon_crm" does not exist`. See README for the first-run
 walkthrough.
 
-Other scripts: `npm run seed:users`, `npm run db:generate` (new migration from schema changes),
+Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
+18-request type chart), `npm run db:generate` (new migration from schema changes),
 `npm run db:push` (dev-only direct sync), `npm run db:studio`,
 `npm run typecheck`, `npm run build`.
 
@@ -604,7 +645,7 @@ Other scripts: `npm run seed:users`, `npm run db:generate` (new migration from s
 - **build** — `npm ci`, `typecheck`, `build`, on Node 20 (the `engines` floor)
   and 22. `fail-fast` is off.
 - **migrations** — spins up a Postgres 16 service, runs `db:create` and
-  `db:migrate` **twice each**, and asserts all nine tables exist. Adding a table
+  `db:migrate` **twice each**, and asserts all ten tables exist. Adding a table
   means adding it to that list.
 
 **CI does not seed** — that would be ~2,600 PokéAPI requests per push, against

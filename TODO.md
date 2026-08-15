@@ -1,6 +1,7 @@
 # TODO
 
-Items 1, 2, 3a, 3c, 4, 5 and 6 are done. 3b is the live backlog.
+Items 1, 2, 3a, 3c, 4, 5 and 6 are done. 3b is the live backlog — its
+`/type/{name}` bullet has landed the matrix, leaving the roster coverage report.
 
 ---
 
@@ -59,12 +60,18 @@ HTTP, so it moved to 3b.
   (~250). Their dex ids are in the 10000s. Needs a decision on whether a form is
   a row in `pokemon` or a new `pokemon_forms` table; a form sharing a dex number
   with its base would break the primary key.
-- **`/type/{name}` — 18 requests, the biggest single unlock.**
-  `damage_relations` is the full effectiveness matrix: defensive weaknesses per
-  Pokémon, coverage gaps per roster. Compute effectiveness server-side from a
-  `type_damage` table; don't ship the matrix to the client. Upgrades 3c's
-  coverage report from "which types can this roster hit with" to "can it cover
-  what it is weak to".
+- **✅ `/type/{name}` — DONE (the matrix and the Pokémon-level surface).**
+  Migration `0007_abnormal_gideon.sql` adds `type_damage` (324 rows);
+  `seed:types` imports it in 18 requests, and `seed` runs it as a pass.
+  `server/src/effectiveness.ts` computes defensive matchups server-side — the
+  matrix is not shipped to the client — and `/api/pokemon/:id` returns them as
+  `matchups`, rendered as a Type matchups card on the Profile.
+
+  **Still open, and the reason this item was picked:** the roster-level half.
+  Upgrading 3c's coverage report from "which types can this roster hit with" to
+  "can it cover what it is weak to" means joining the active roster's movepool
+  types against the matrix on the trainer dashboard. Everything it needs is now
+  in place.
 - **`/pokemon/{id}/encounters`** — 1,025 requests, tiny responses. Location,
   method, and rarity per game version; backs a "where does this come from" panel.
 - **`/ability/{name}`** — ~370 requests. Effect text so abilities render as prose
@@ -88,7 +95,8 @@ CLAUDE.md § `moves` and `pokemon_moves`:
 - `power: 0` is not `power: null`, and neither means zero damage.
 - Coverage must exclude status moves.
 
-"Can a roster cover its own weaknesses" still needs 3b's `/type/{name}`.
+"Can a roster cover its own weaknesses" now has its data — see 3b's
+`/type/{name}`, which landed the matrix but not yet the roster-level report.
 
 ### 3d. Completionist
 
@@ -150,5 +158,6 @@ Still open:
 - **No dark mode.** Tokens are centralised in `index.css` if it comes back.
 - **The needs-attention model ignores movepools.** A thin movepool or an
   uncovered weakness is arguably an alert; it is a sixth signal plus a weight in
-  `ATTENTION`, and should wait for 3b's type chart so the signal can be about
-  coverage rather than raw move count.
+  `ATTENTION`. The type chart it was waiting on now exists (3b), so the signal
+  can be about coverage rather than raw move count — but it should follow the
+  roster-level coverage report rather than lead it.
