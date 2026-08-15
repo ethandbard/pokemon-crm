@@ -1,8 +1,8 @@
 # TODO
 
 Items 1, 2, 3a, 3c, 4, 5 and 6 are done. **Item 7 — the roster-building pivot —
-is the live work**; phases 7a and 7b have landed, 7c is next. 3b's remaining
-bullets are parked behind it.
+is the live work**; phases 7a–7c have landed, 7d (ownership) is next. 3b's
+remaining bullets are parked behind it.
 
 ---
 
@@ -10,9 +10,11 @@ bullets are parked behind it.
 
 `server/src/attention.ts` (scorer) + `routes/attention.ts` +
 `components/AttentionQueue.tsx`. Surfaced workspace-wide on Home and per-trainer
-on the Trainers dashboard. Five signals: never reviewed, stale review, flagged,
-milestone overdue, behind pace. Weights and the seeding dependencies are
-documented in CLAUDE.md § Needs-attention scoring.
+on the Trainers dashboard.
+
+**The signals were replaced in 7c** — see there. The queue is now moveset
+readiness plus review hygiene, with a separate trainer-level alert list. Weights
+and constraints live in CLAUDE.md § Needs-attention scoring.
 
 ## ✅ 2. Interactivity layer — DONE
 
@@ -182,20 +184,30 @@ Both cleanups landed with it:
 client — `members.length` ties on the best result even when neutral, so "how
 many can answer this" needed to mean one thing.
 
-### 7c. Attention rework — next
+### ✅ 7c. Attention rework — DONE
 
-Drop `behind_pace` (and `expPerDay`, the invented constant it rests on), plus
-`flagged` and `milestone_overdue`. Keep the review signals. Add
-`moveset_missing` and `moveset_incomplete`, and a **new trainer-level**
-`getRosterAlerts()` for roster-below-six and unanswered shared weaknesses —
-member-level and trainer-level alerts don't fit one list shape.
+`behind_pace` is gone, and `expPerDay` with it — the queue no longer reports a
+simulation as a finding. `flagged` and `milestone_overdue` went too.
+`moveset_missing` and `moveset_incomplete` are the new member signals, and
+`getRosterAlerts()` is a **separate trainer-level list** (roster below six,
+unanswered shared weakness), because a roster alert has no member to hang on.
 
-⚠️ Dropping `flagged` removes the only manual escalation path into the queue.
-Reversible in four lines of `scoreFacts` if that turns out to be wrong.
+Two things found while building it:
 
-Once pacing goes, nothing reads `growth_rates` (600 rows). Leave it seeded.
+- **Alerts had to cap on the workspace-wide view.** Ten rosters produce ~38
+  alerts, which buried a member queue capped at 8. Scoped to one trainer they
+  all ship — Brock's six unanswered weaknesses are each real — so only the
+  unscoped view caps, and it returns `alertsTotal` with it.
+- Weaknesses sort worst-first so a capped view keeps the worst.
 
-### 7d. Trainer ownership
+⚠️ Dropping `flagged` removed the only manual escalation path into the queue.
+Reversible in four lines of `scoreFacts`.
+
+Nothing reads `growth_rates` (600 rows) any more; the table stays seeded.
+Evolution readiness survives as the trainer dashboard's "Ready to evolve" card —
+it is no longer an alert, which is the distinction.
+
+### 7d. Trainer ownership — next
 
 `trainers.owner`, scoped to the acting user by default with an "All trainers"
 toggle. **Not `trainers.email`** — that column already exists and is the

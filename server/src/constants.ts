@@ -32,47 +32,53 @@ export const SEED_USERS = [
  * Scores are unbounded sums; only the ranking matters, not the absolute number.
  */
 export const ATTENTION = {
+  /**
+   * A member carrying no moves at all. The heaviest signal here: it cannot
+   * attack, and it contributes nothing to the team's coverage, so every
+   * analysis figure understates the roster until it is fixed.
+   */
+  movesetMissing: 50,
+  /** Per empty slot, for a member with 1–3 of its 4 moves set. */
+  movesetIncompletePerSlot: 8,
   /** No `reviewed` flag has ever been set for this roster member. */
   neverReviewed: 40,
   /** Days past `staleAfterDays` are worth this much each, capped. */
   stalePerDay: 1.5,
   staleAfterDays: 30,
   staleCap: 45,
-  /** An explicit `flagged` status — someone already raised a concern. */
-  flagged: 35,
-  /** Met the level requirement for its next stage but hasn't evolved. */
-  milestoneOverdue: 30,
-  /** Per level behind the pace its growth curve implies, capped. */
-  behindPacePerLevel: 2.5,
-  behindPaceCap: 30,
-  /** Levels behind before the signal fires at all — absorbs rounding noise. */
-  behindPaceTolerance: 3,
 
+  /* ---- Trainer-level alerts (getRosterAlerts), not member scores ---- */
+
+  /** A full party is six; below that the roster has holes to fill. */
+  fullRosterSize: 6,
   /**
-   * Simulation constant: assumed EXP earned per day on a roster.
-   *
-   * There is no real-world training rate to read from PokeAPI — growth rates
-   * give EXP-per-level, not EXP-per-day. This turns "time on roster" into an
-   * expected level via the species' real curve. It is an explicit modelling
-   * assumption, not a measurement; tune it if rosters read as uniformly
-   * behind or uniformly ahead.
-   *
-   * Calibrated so a year on roster lands around level 65 on the `medium`
-   * curve, which puts expected levels in the same band as the seeded ones
-   * (29–72). Raising it makes the queue harsher for everyone equally.
+   * Members a type must hit for 2× before an unanswered weakness is an alert.
+   * One exposed member is a matchup; several with no reply is a structural
+   * problem — the same threshold the team analysis uses for `threats`.
    */
-  expPerDay: 700,
+  sharedWeaknessMembers: 2,
 
   /** Retired roster members are history, not workload — never surfaced. */
   excludeStatuses: ['retired'] as const,
 } as const;
 
+/**
+ * Why a roster member is in the queue.
+ *
+ * `behind_pace` was removed with the model that produced it: it rested on
+ * `expPerDay`, an invented EXP-per-day constant PokeAPI has no equivalent for,
+ * so it reported a simulation as a finding. `flagged` and `milestone_overdue`
+ * went with it to keep the queue about roster readiness rather than a mix of
+ * readiness, hand-raised concerns, and level bookkeeping.
+ */
 export type AttentionReasonCode =
   | 'never_reviewed'
   | 'stale_review'
-  | 'flagged'
-  | 'milestone_overdue'
-  | 'behind_pace';
+  | 'moveset_missing'
+  | 'moveset_incomplete';
+
+/** Why a whole roster is flagged, independent of any one member. */
+export type RosterAlertCode = 'roster_incomplete' | 'unanswered_weakness';
 
 export const POKEMON_TYPES = [
   'normal',

@@ -1,7 +1,13 @@
 import { sql } from 'drizzle-orm';
 import { db } from './db/client.js';
-import { activity, growthRates, pokemon, roster, trainers } from './db/schema.js';
-import { ATTENTION, type AttentionReasonCode } from './constants.js';
+import { activity, moves, pokemon, roster, rosterMoves, trainers } from './db/schema.js';
+import { ATTENTION, type AttentionReasonCode, type RosterAlertCode } from './constants.js';
+import {
+  loadTypeChart,
+  offensiveCoverage,
+  rosterVulnerabilities,
+  type RosterMember,
+} from './effectiveness.js';
 
 /**
  * Needs-attention scoring — the early-alert model.
@@ -30,12 +36,8 @@ interface AttentionFacts {
   daysOnRoster: number;
   /** Null when this Pokémon has never been reviewed by anyone. */
   daysSinceReview: number | null;
-  isFlagged: boolean;
-  milestoneOverdue: boolean;
-  nextEvolutionName: string | null;
-  nextEvolutionLevel: number | null;
-  /** Level the growth curve implies for its time on roster. */
-  expectedLevel: number | null;
+  /** Filled move slots, 0–4. The readiness signal. */
+  movesetSize: number;
 }
 
 export interface AttentionReason {
@@ -63,6 +65,22 @@ function round(value: number): number {
 export function scoreFacts(facts: AttentionFacts): AttentionItem {
   const reasons: AttentionReason[] = [];
 
+  // Readiness first — it is the heaviest signal and the most actionable.
+  if (facts.movesetSize === 0) {
+    reasons.push({
+      code: 'moveset_missing',
+      points: ATTENTION.movesetMissing,
+      label: 'No moves set — cannot attack, and adds nothing to team coverage',
+    });
+  } else if (facts.movesetSize < 4) {
+    const empty = 4 - facts.movesetSize;
+    reasons.push({
+      code: 'moveset_incomplete',
+      points: round(empty * ATTENTION.movesetIncompletePerSlot),
+      label: `${facts.movesetSize} of 4 moves set`,
+    });
+  }
+
   if (facts.daysSinceReview === null) {
     reasons.push({
       code: 'never_reviewed',
@@ -76,32 +94,6 @@ export function scoreFacts(facts: AttentionFacts): AttentionItem {
       points: round(Math.min(overdue * ATTENTION.stalePerDay, ATTENTION.staleCap)),
       label: `Last reviewed ${facts.daysSinceReview} days ago`,
     });
-  }
-
-  if (facts.isFlagged) {
-    reasons.push({ code: 'flagged', points: ATTENTION.flagged, label: 'Flagged for follow-up' });
-  }
-
-  if (facts.milestoneOverdue) {
-    reasons.push({
-      code: 'milestone_overdue',
-      points: ATTENTION.milestoneOverdue,
-      label: facts.nextEvolutionName
-        ? `Ready to evolve into ${facts.nextEvolutionName} since Lv ${facts.nextEvolutionLevel}`
-        : 'Evolution milestone met',
-    });
-  }
-
-  // Only meaningful when we know both the actual and the expected level.
-  if (facts.expectedLevel !== null && facts.level !== null) {
-    const behind = facts.expectedLevel - facts.level;
-    if (behind > ATTENTION.behindPaceTolerance) {
-      reasons.push({
-        code: 'behind_pace',
-        points: round(Math.min(behind * ATTENTION.behindPacePerLevel, ATTENTION.behindPaceCap)),
-        label: `${behind} levels behind pace (expected ~Lv ${facts.expectedLevel} after ${facts.daysOnRoster} days)`,
-      });
-    }
   }
 
   const score = round(reasons.reduce((total, reason) => total + reason.points, 0));
@@ -141,41 +133,11 @@ async function loadFacts(trainerId?: number): Promise<AttentionFacts[]> {
         where a.pokemon_id = r.pokemon_id and a.kind = 'reviewed'
       )                                                      as "daysSinceReview",
 
-      exists (
-        select 1 from ${activity} a
-        where a.pokemon_id = r.pokemon_id and a.kind = 'flagged'
-      )                                                      as "isFlagged",
-
+      -- Equipped moves, not the learnable movepool. Keyed on the roster entry,
+      -- so two trainers carrying the same species are judged separately.
       (
-        not p.is_fully_evolved
-        and r.level is not null
-        and exists (
-          select 1 from ${pokemon} n
-          where n.evolves_from_id = r.pokemon_id
-            and n.evolution_min_level is not null
-            and r.level >= n.evolution_min_level
-        )
-      )                                                      as "milestoneOverdue",
-
-      (
-        select n.display_name from ${pokemon} n
-        where n.evolves_from_id = r.pokemon_id
-        order by n.evolution_min_level nulls last, n.id limit 1
-      )                                                      as "nextEvolutionName",
-      (
-        select n.evolution_min_level from ${pokemon} n
-        where n.evolves_from_id = r.pokemon_id
-        order by n.evolution_min_level nulls last, n.id limit 1
-      )                                                      as "nextEvolutionLevel",
-
-      -- Highest level whose cumulative EXP is covered by (days on roster ×
-      -- ATTENTION.expPerDay), on this species' real growth curve.
-      (
-        select max(g.level)
-        from ${growthRates} g
-        where g.name = p.growth_rate
-          and g.experience <= greatest(0, extract(day from now() - r.acquired_at)) * ${ATTENTION.expPerDay}
-      )                                                      as "expectedLevel"
+        select count(*)::int from ${rosterMoves} rm where rm.roster_id = r.id
+      )                                                      as "movesetSize"
 
     from ${roster} r
     join ${pokemon} p on p.id = r.pokemon_id
@@ -205,4 +167,130 @@ export async function getAttentionQueue(options: {
     items: options.limit ? items.slice(0, options.limit) : items,
     scanned: facts.length,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Trainer-level alerts                                                       */
+/* -------------------------------------------------------------------------- */
+
+export interface RosterAlert {
+  code: RosterAlertCode;
+  trainerId: number;
+  trainerName: string;
+  label: string;
+  /** Supporting detail — the exposed members, the count of empty slots. */
+  detail: string;
+}
+
+/**
+ * Problems that belong to a **roster**, not to any one member.
+ *
+ * Deliberately a separate list from the member queue rather than a wider item
+ * shape: "this team has no answer to Ground" has no `rosterId`, sprite, level
+ * or species, and folding it in would leave half of every item null.
+ *
+ * Two signals today, both facts about the team as a whole:
+ *  - the active roster is short of a full party
+ *  - a type hits several members for 2× and nothing on the team answers it
+ */
+export async function getRosterAlerts(trainerId?: number): Promise<RosterAlert[]> {
+  const rows = await db.execute(sql`
+    select
+      t.id                                            as "trainerId",
+      t.name                                          as "trainerName",
+      r.id                                            as "rosterId",
+      coalesce(r.nickname, p.display_name)            as "memberName",
+      p.display_name                                  as "displayName",
+      p.type1                                         as "type1",
+      p.type2                                         as "type2",
+      (select count(*)::int from ${rosterMoves} rm where rm.roster_id = r.id) as "movesetSize",
+      coalesce(
+        (
+          select array_agg(distinct m.type)
+          from ${rosterMoves} rm
+          join ${moves} m on m.id = rm.move_id
+          where rm.roster_id = r.id and m.damage_class <> 'status'
+        ),
+        '{}'
+      )                                               as "equippedMoveTypes"
+    from ${trainers} t
+    left join ${roster} r on r.trainer_id = t.id and r.status <> 'retired'
+    left join ${pokemon} p on p.id = r.pokemon_id
+    ${trainerId === undefined ? sql`` : sql`where t.id = ${trainerId}`}
+  `);
+
+  // Group the flat join back into rosters. A trainer with an empty active
+  // roster still appears, with a null member row — that is itself an alert.
+  const byTrainer = new Map<number, { name: string; members: RosterMember[] }>();
+  for (const row of rows.rows as unknown as {
+    trainerId: number;
+    trainerName: string;
+    rosterId: number | null;
+    memberName: string | null;
+    displayName: string | null;
+    type1: string | null;
+    type2: string | null;
+    movesetSize: number;
+    equippedMoveTypes: string[];
+  }[]) {
+    const entry = byTrainer.get(row.trainerId) ?? { name: row.trainerName, members: [] };
+    if (row.rosterId !== null && row.type1 !== null) {
+      entry.members.push({
+        rosterId: row.rosterId,
+        displayName: row.displayName ?? '',
+        nickname: row.memberName,
+        type1: row.type1,
+        type2: row.type2,
+        equippedMoveTypes: row.equippedMoveTypes,
+        movesetSize: row.movesetSize,
+      });
+    }
+    byTrainer.set(row.trainerId, entry);
+  }
+
+  const chart = await loadTypeChart();
+  const alerts: RosterAlert[] = [];
+
+  for (const [id, { name, members }] of byTrainer) {
+    if (members.length < ATTENTION.fullRosterSize) {
+      const short = ATTENTION.fullRosterSize - members.length;
+      alerts.push({
+        code: 'roster_incomplete',
+        trainerId: id,
+        trainerName: name,
+        label: `Roster is ${short} short of a full party`,
+        detail: `${members.length} of ${ATTENTION.fullRosterSize} active members`,
+      });
+    }
+
+    if (members.length === 0) continue;
+
+    // Same rule as the team analysis: exposed on several members AND no
+    // super-effective reply. Either alone is survivable.
+    const answered = new Set(
+      offensiveCoverage(chart, members)
+        .filter((entry) => entry.bestMultiplier > 100)
+        .map((entry) => entry.type),
+    );
+
+    // Worst first, so a capped view keeps the alerts that matter most.
+    const exposures = rosterVulnerabilities(chart, members)
+      .filter(
+        (exposure) =>
+          exposure.weakCount >= ATTENTION.sharedWeaknessMembers && !answered.has(exposure.type),
+      )
+      .sort((a, b) => b.weakCount - a.weakCount || a.type.localeCompare(b.type));
+
+    for (const exposure of exposures) {
+      alerts.push({
+        code: 'unanswered_weakness',
+        trainerId: id,
+        trainerName: name,
+        label: `No answer to ${exposure.type}`,
+        detail: `Hits ${exposure.weakCount} hard: ${exposure.weakMembers.join(', ')}`,
+      });
+    }
+  }
+
+  return alerts;
 }

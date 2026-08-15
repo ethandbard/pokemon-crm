@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { getAttentionQueue } from '../attention.js';
+import { getAttentionQueue, getRosterAlerts } from '../attention.js';
 import { ATTENTION } from '../constants.js';
 import { asyncHandler } from '../http.js';
 
@@ -22,21 +22,43 @@ attentionRouter.get(
       })
       .parse(req.query);
 
-    const { items, scanned } = await getAttentionQueue(query);
+    const [{ items, scanned }, allAlerts] = await Promise.all([
+      getAttentionQueue(query),
+      getRosterAlerts(query.trainerId),
+    ]);
+
+    /*
+     * Scoped to one trainer, every alert is actionable and they all ship —
+     * Brock genuinely has six unanswered weaknesses and hiding three would
+     * misrepresent the roster.
+     *
+     * Workspace-wide it is a summary of ten rosters, where the same honesty
+     * produces ~38 rows above a member queue capped at 8. So that view caps,
+     * and reports the total alongside — never a bare limit (see CLAUDE.md
+     * § API conventions).
+     */
+    const alertLimit = query.trainerId === undefined ? (query.limit ?? 8) : allAlerts.length;
+    const alerts = allAlerts.slice(0, alertLimit);
 
     res.json({
       data: items,
       scanned,
       flagged: items.length,
       /*
-       * The model is surfaced so the UI can explain itself — expPerDay in
-       * particular is a simulation assumption, not a measurement, and users
-       * should be able to see that rather than trust a bare number.
+       * Roster-level problems, alongside the member queue rather than inside
+       * it — see getRosterAlerts for why they are not one list.
+       */
+      alerts,
+      alertsTotal: allAlerts.length,
+      /*
+       * The model is surfaced so the UI can explain itself. Every number here
+       * is now a threshold over recorded facts; the old expPerDay simulation
+       * constant is gone along with the signal that needed it.
        */
       model: {
         staleAfterDays: ATTENTION.staleAfterDays,
-        behindPaceTolerance: ATTENTION.behindPaceTolerance,
-        expPerDay: ATTENTION.expPerDay,
+        fullRosterSize: ATTENTION.fullRosterSize,
+        sharedWeaknessMembers: ATTENTION.sharedWeaknessMembers,
       },
     });
   }),

@@ -332,7 +332,7 @@ All routes are under `/api`. Responses are JSON; errors are
 | PATCH | `/api/users/:id` | Update `name` / `role` / `initials`. **Not `email`** |
 | DELETE | `/api/users/:id` | Remove the identity; their notes and flags stay. Refuses on `DEFAULT_OWNER` |
 | GET | `/api/trainers` | All trainers with roster size and mean BST — `search` (name, region, specialty). Unpaginated: it backs a select control |
-| GET | `/api/attention` | Needs-attention queue — `trainerId` (omit for workspace-wide), `limit`. Returns each item's `score` and `reasons`, plus the `model` constants |
+| GET | `/api/attention` | Needs-attention queue — `trainerId` (omit for workspace-wide), `limit`. Returns each item's `score` and `reasons`, trainer-level `alerts` + `alertsTotal`, plus the `model` constants |
 | POST | `/api/activity/bulk` | Set or clear one flag across many Pokémon (explicit target state, not a toggle) |
 | POST | `/api/notes/bulk` | Write the same note against many Pokémon |
 | POST | `/api/trainers/:id/roster/bulk` | Add many Pokémon to a roster; already-present ones are skipped, not an error |
@@ -572,21 +572,42 @@ former.
 Every weight lives in `ATTENTION` (`constants.ts`) and produces both the score
 and the human-readable reasons.
 
-Five signals: never reviewed, stale review, flagged, milestone overdue, behind
-pace. Retired roster members are never scored.
+**Two lists, deliberately not one.**
 
-**`expPerDay` is a simulation constant, not a measurement** — PokeAPI gives
-EXP-per-level, never EXP-per-day. It is surfaced in the API response and printed
-under the queue in the UI. Tune it if rosters read as uniformly ahead or behind.
+- `getAttentionQueue()` — **member-level**: moveset missing, moveset incomplete,
+  never reviewed, stale review. Retired members are never scored.
+- `getRosterAlerts()` — **trainer-level**: roster short of a full party, and a
+  type that hits `sharedWeaknessMembers` or more members with no super-effective
+  reply.
 
-Two seeding dependencies, both of which silently disable signals if lost:
+They stay separate because a roster alert has no `rosterId`, sprite, level or
+species. Folding it into the member queue would leave half of every item null.
 
-- **`roster.acquired_at` must be backdated** — it defaults to `now()`, which
-  gives every member zero days on roster and disables the pace signal.
-  `seed:trainers` spreads tenure.
-- **Some review history must exist**, or "never reviewed" fires for nearly every
-  member. `seed:trainers` reviews two thirds of roster Pokémon, but only those
-  with **no** activity rows, so hand-set flags are never overwritten.
+**Every threshold is now a rule over recorded facts.** The model used to include
+`behind_pace`, which rested on `expPerDay` — an assumed EXP-per-day training rate
+with no equivalent anywhere in PokeAPI, which reported a simulation as a finding.
+It is gone, along with `flagged` and `milestone_overdue`; the queue is about
+whether a roster is ready, not a mix of readiness, hand-raised concerns and level
+bookkeeping. **Do not reintroduce a signal that depends on an invented rate.**
+
+Consequences of that removal, worth knowing:
+
+- **Nothing reads `growth_rates`** (600 rows) any more. The table and its seed
+  stay — cheap, and real reference data — but no code path touches it.
+- **`roster.acquired_at` no longer gates a signal.** `seed:trainers` still
+  backdates it and `daysOnRoster` is still returned, but nothing scores on it.
+- **Evolution readiness did not disappear from the app** — the trainer
+  dashboard's "Ready to evolve" card still reads `milestoneEligible`. It is no
+  longer an *alert*, which is the distinction.
+
+Still true: **some review history must exist**, or "never reviewed" fires for
+nearly every member. `seed:trainers` reviews two thirds of roster Pokémon, but
+only those with **no** activity rows, so hand-set flags are never overwritten.
+
+**Alerts cap on the workspace-wide view only.** Scoped to one trainer every alert
+ships — a roster with six unanswered weaknesses has six, and hiding three would
+misrepresent it. Across ten rosters that is ~38 rows above a queue capped at 8,
+so `/api/attention` without `trainerId` caps and returns `alertsTotal` alongside.
 
 ### The acting user
 

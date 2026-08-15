@@ -2,7 +2,12 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toQueryString } from '../lib/api';
 import { useApi } from '../lib/useApi';
-import type { AttentionItem, AttentionReasonCode, AttentionResponse } from '../lib/types';
+import type {
+  AttentionItem,
+  AttentionReasonCode,
+  AttentionResponse,
+  RosterAlertCode,
+} from '../lib/types';
 import { Card, EmptyState, ErrorState, Loading } from './ui';
 import { dexNumber } from '../lib/format';
 
@@ -11,31 +16,31 @@ import { dexNumber } from '../lib/format';
  * icon and its full label, so the queue stays readable without relying on hue.
  */
 const REASON_META: Record<AttentionReasonCode, { icon: string; short: string; tone: string }> = {
+  moveset_missing: {
+    icon: '⌀',
+    short: 'No moves',
+    tone: 'border-status-critical/40 bg-status-critical/10 text-status-critical',
+  },
+  moveset_incomplete: {
+    icon: '◑',
+    short: 'Partial moveset',
+    tone: 'border-status-warning/60 bg-status-warning/10 text-ink-2',
+  },
   never_reviewed: {
     icon: '○',
     short: 'Never reviewed',
-    tone: 'border-status-critical/40 bg-status-critical/10 text-status-critical',
+    tone: 'border-status-serious/50 bg-status-serious/10 text-ink-2',
   },
   stale_review: {
     icon: '◔',
     short: 'Stale',
-    tone: 'border-status-serious/50 bg-status-serious/10 text-ink-2',
+    tone: 'border-hairline bg-plane text-ink-2',
   },
-  flagged: {
-    icon: '▲',
-    short: 'Flagged',
-    tone: 'border-brand/40 bg-brand/10 text-brand-strong',
-  },
-  milestone_overdue: {
-    icon: '★',
-    short: 'Milestone',
-    tone: 'border-status-good/40 bg-status-good/10 text-ink-2',
-  },
-  behind_pace: {
-    icon: '↓',
-    short: 'Behind pace',
-    tone: 'border-status-warning/60 bg-status-warning/10 text-ink-2',
-  },
+};
+
+const ALERT_META: Record<RosterAlertCode, { icon: string; tone: string }> = {
+  roster_incomplete: { icon: '◱', tone: 'text-status-warning' },
+  unanswered_weakness: { icon: '⚠', tone: 'text-status-critical' },
 };
 
 /** Highest score in the queue drives the bar scale, so ranking reads visually. */
@@ -86,39 +91,76 @@ export function AttentionQueue({
         <Loading rows={4} label="Scoring roster…" />
       ) : error ? (
         <ErrorState message={error} onRetry={refetch} />
-      ) : !data || data.data.length === 0 ? (
-        <EmptyState
-          title="Nothing needs attention"
-          description={
-            data && data.scanned === 0
-              ? 'There are no active roster members to score yet.'
-              : 'Every active roster member has been reviewed recently, is on pace, and has no open flags.'
-          }
-        />
-      ) : (
+      ) : !data ? null : (
         <>
-          <ol className="space-y-2">
-            {data.data.map((item, index) => (
-              <AttentionRow
-                key={item.rosterId}
-                item={item}
-                rank={index + 1}
-                maxScore={maxScore}
-                showTrainer={showTrainer}
-                open={expanded === item.rosterId}
-                onToggle={() => setExpanded(expanded === item.rosterId ? null : item.rosterId)}
-              />
-            ))}
-          </ol>
+          {/*
+            Roster-level problems sit above the member list: "this team has no
+            answer to Ground" is not any one member's fault, and fixing it may
+            mean adding a Pokémon rather than editing one.
+          */}
+          {data.alerts.length > 0 && (
+            <ul className="mb-2 space-y-1.5">
+              {data.alerts.map((alert) => (
+                <li
+                  key={`${alert.trainerId}-${alert.code}-${alert.label}`}
+                  className="flex items-start gap-2 rounded-md border border-hairline bg-plane/60 px-2.5 py-1.5 text-xs"
+                >
+                  <span aria-hidden="true" className={`mt-0.5 ${ALERT_META[alert.code].tone}`}>
+                    {ALERT_META[alert.code].icon}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="font-medium text-ink">
+                      {showTrainer && `${alert.trainerName}: `}
+                      {alert.label}
+                    </span>
+                    <span className="block text-muted">{alert.detail}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {data.alertsTotal > data.alerts.length && (
+            <p className="mb-4 text-xs text-muted">
+              Showing {data.alerts.length} of {data.alertsTotal} roster alerts — open a trainer to
+              see all of theirs.
+            </p>
+          )}
+
+          {data.data.length === 0 ? (
+            <EmptyState
+              title="No member needs attention"
+              description={
+                data.scanned === 0
+                  ? 'There are no active roster members to score yet.'
+                  : 'Every active roster member has a full moveset and a recent review.'
+              }
+            />
+          ) : (
+            <ol className="space-y-2">
+              {data.data.map((item, index) => (
+                <AttentionRow
+                  key={item.rosterId}
+                  item={item}
+                  rank={index + 1}
+                  maxScore={maxScore}
+                  showTrainer={showTrainer}
+                  open={expanded === item.rosterId}
+                  onToggle={() => setExpanded(expanded === item.rosterId ? null : item.rosterId)}
+                />
+              ))}
+            </ol>
+          )}
 
           {/*
-            The pace signal rests on an assumed training rate. Saying so keeps
-            the score honest rather than letting it read as measured fact.
+            Every threshold here is a rule over recorded facts. The old note
+            explained an assumed EXP-per-day training rate, which was the one
+            number in this card that was invented rather than observed.
           */}
           <p className="mt-4 border-t border-hairline pt-3 text-xs text-muted">
-            Stale after {data.model.staleAfterDays} days · pace assumes{' '}
-            {data.model.expPerDay.toLocaleString()} EXP/day against each species&rsquo; real growth
-            curve, tolerating {data.model.behindPaceTolerance} levels.
+            Reviews go stale after {data.model.staleAfterDays} days · a full party is{' '}
+            {data.model.fullRosterSize} · a weakness is raised once it hits{' '}
+            {data.model.sharedWeaknessMembers} members with no super-effective reply.
           </p>
         </>
       )}

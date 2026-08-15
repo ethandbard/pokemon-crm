@@ -243,12 +243,27 @@ export interface RosterMember {
   milestoneEligible: boolean;
 }
 
+/**
+ * Why a roster member is in the queue. All four are rules over recorded facts;
+ * the old `behind_pace` signal rested on an invented EXP-per-day constant and
+ * was removed with it.
+ */
 export type AttentionReasonCode =
+  | 'moveset_missing'
+  | 'moveset_incomplete'
   | 'never_reviewed'
-  | 'stale_review'
-  | 'flagged'
-  | 'milestone_overdue'
-  | 'behind_pace';
+  | 'stale_review';
+
+/** Why a whole roster is flagged, independent of any one member. */
+export type RosterAlertCode = 'roster_incomplete' | 'unanswered_weakness';
+
+export interface RosterAlert {
+  code: RosterAlertCode;
+  trainerId: number;
+  trainerName: string;
+  label: string;
+  detail: string;
+}
 
 export interface AttentionReason {
   code: AttentionReasonCode;
@@ -271,11 +286,8 @@ export interface AttentionItem {
   status: RosterStatus;
   daysOnRoster: number;
   daysSinceReview: number | null;
-  isFlagged: boolean;
-  milestoneOverdue: boolean;
-  nextEvolutionName: string | null;
-  nextEvolutionLevel: number | null;
-  expectedLevel: number | null;
+  /** Filled move slots, 0–4. */
+  movesetSize: number;
   score: number;
   reasons: AttentionReason[];
 }
@@ -286,7 +298,13 @@ export interface AttentionResponse {
   scanned: number;
   /** How many had at least one firing signal. */
   flagged: number;
-  model: { staleAfterDays: number; behindPaceTolerance: number; expPerDay: number };
+  /**
+   * Roster-level problems, which belong to a team rather than a member.
+   * Capped on the workspace-wide view; `alertsTotal` is the unclipped count.
+   */
+  alerts: RosterAlert[];
+  alertsTotal: number;
+  model: { staleAfterDays: number; fullRosterSize: number; sharedWeaknessMembers: number };
 }
 
 export interface EvolutionLink {
