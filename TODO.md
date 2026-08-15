@@ -1,7 +1,8 @@
 # TODO
 
-Items 1, 2, 3a, 3c, 4, 5 and 6 are done. 3b is the live backlog — its
-`/type/{name}` bullet has landed the matrix, leaving the roster coverage report.
+Items 1, 2, 3a, 3c, 4, 5 and 6 are done. **Item 7 — the roster-building pivot —
+is the live work**; phase 1 has landed. 3b's remaining bullets are parked behind
+it.
 
 ---
 
@@ -67,11 +68,9 @@ HTTP, so it moved to 3b.
   matrix is not shipped to the client — and `/api/pokemon/:id` returns them as
   `matchups`, rendered as a Type matchups card on the Profile.
 
-  **Still open, and the reason this item was picked:** the roster-level half.
-  Upgrading 3c's coverage report from "which types can this roster hit with" to
-  "can it cover what it is weak to" means joining the active roster's movepool
-  types against the matrix on the trainer dashboard. Everything it needs is now
-  in place.
+  **The roster-level half landed with item 7 phase 1** — and turned out to need
+  movesets first. Answering "can it cover what it is weak to" from the
+  *learnable* movepool would have said yes for nearly every roster.
 - **`/pokemon/{id}/encounters`** — 1,025 requests, tiny responses. Location,
   method, and rarity per game version; backs a "where does this come from" panel.
 - **`/ability/{name}`** — ~370 requests. Effect text so abilities render as prose
@@ -140,6 +139,63 @@ Still open:
   enforce it with; the UI doesn't distinguish yours from theirs.
 - Existing rows seeded before this landed stay under `DEFAULT_OWNER`; only newly
   seeded review history spreads across users.
+
+---
+
+## 7. Roster building as the product
+
+The pivot: make building and evaluating a roster the point, and the analysis
+honest. Plan agreed in four phases; **phase 1 is done**.
+
+### ✅ 7a. Movesets and honest coverage — DONE
+
+Migration `0008_flat_nocturne.sql` adds `roster_moves` (four slots per entry).
+`PUT /api/roster/:id/moves` replaces a whole moveset and **rejects moves the
+species cannot learn** — the rule the whole feature rests on.
+`GET /api/trainers/:id/analysis` returns offence, defence, gaps, threats and
+readiness, computed in `effectiveness.ts` from equipped moves only. Surfaced as
+the Team analysis card and a Moveset column on the trainer dashboard; the old
+coverage card is relabelled "(potential)".
+
+The constraint worth not reintroducing is recorded in CLAUDE.md § Roster
+analysis: **equipped is `roster_moves`, learnable is `pokemon_moves`**, and a
+team-strength figure that reads the latter is a ceiling wearing the wrong label.
+
+### 7b. Team-leader dashboard — next
+
+A new `/team` page (the dex-wide `/dashboard` stays as it is), trainer-scoped,
+reading the analysis endpoint. Two cleanups belong with it: `axisProps` /
+`tooltipProps` are copy-pasted between `Dashboard.tsx` and `Trainers.tsx`, and
+the trainer dashboard's `statAverages` fails to filter out retired members
+despite its own subtitle.
+
+### 7c. Attention rework
+
+Drop `behind_pace` (and `expPerDay`, the invented constant it rests on), plus
+`flagged` and `milestone_overdue`. Keep the review signals. Add
+`moveset_missing` and `moveset_incomplete`, and a **new trainer-level**
+`getRosterAlerts()` for roster-below-six and unanswered shared weaknesses —
+member-level and trainer-level alerts don't fit one list shape.
+
+⚠️ Dropping `flagged` removes the only manual escalation path into the queue.
+Reversible in four lines of `scoreFacts` if that turns out to be wrong.
+
+Once pacing goes, nothing reads `growth_rates` (600 rows). Leave it seeded.
+
+### 7d. Trainer ownership
+
+`trainers.owner`, scoped to the acting user by default with an "All trainers"
+toggle. **Not `trainers.email`** — that column already exists and is the
+trainer's own contact address.
+
+The surface area is the point: four duplicated `trainerOptions` queries plus
+joins in `attention.ts`, `moves.ts` and `stats.ts` all need the same predicate,
+so extract one helper rather than write it eight times. `BulkActionBar`'s
+trainer dropdown is a *write* target and must scope too. Notes and activity
+stay workspace-visible.
+
+With no auth this stays a convention, not a guarantee — switching users grants
+you their trainers, and the copy should say so.
 
 ---
 

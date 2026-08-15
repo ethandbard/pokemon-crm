@@ -216,10 +216,14 @@ export interface RosterMember {
   isLegendary: boolean;
   spriteUrl: string | null;
   noteCount: number;
-  /** Distinct moves learnable. */
+  /** Distinct moves learnable — the ceiling, not what it carries. */
   moveCount: number;
-  /** Distinct types it can attack with — status moves excluded. */
+  /** Distinct types it *could* attack with — status moves excluded. */
   coverageCount: number;
+  /** Slots filled of four. This is the equipped moveset, keyed per roster entry. */
+  movesetSize: number;
+  /** Distinct types the equipped moves reach — status moves excluded. */
+  movesetCoverage: number;
   activityKinds: ActivityKind[];
 
   // Evolution progress — the "degree progress" model.
@@ -357,6 +361,45 @@ export interface EvolutionRequirement {
   relativePhysicalStats?: number;
   needsOverworldRain?: boolean;
   turnUpsideDown?: boolean;
+}
+
+/** One equipped move on a roster entry. Slot is 1–4, mirroring the games. */
+export interface MovesetSlot {
+  slot: number;
+  moveId: number;
+  name: string;
+  displayName: string;
+  type: string;
+  damageClass: MoveDamageClass;
+  power: number | null;
+  accuracy: number | null;
+  pp: number | null;
+}
+
+/**
+ * Team analysis for one trainer's **active** roster, from
+ * `GET /api/trainers/:id/analysis`.
+ *
+ * Everything here is computed from *equipped* moves (`roster_moves`), not the
+ * learnable movepool — that distinction is the whole point of the feature.
+ */
+export interface TrainerAnalysis {
+  trainer: { id: number; name: string };
+  /** All 18 types, with the best multiplier the team's moves achieve. */
+  offense: { type: string; bestMultiplier: number; members: string[] }[];
+  /** All 18 types, with how many members each one hits hard. */
+  defense: { type: string; weakCount: number; resistCount: number; weakMembers: string[] }[];
+  /** Types nothing on the team hits for extra damage. */
+  gaps: string[];
+  /** Types that hit 2+ members hard AND have no super-effective answer. */
+  threats: { type: string; weakCount: number; resistCount: number; weakMembers: string[] }[];
+  readiness: {
+    activeMembers: number;
+    withFullMoveset: number;
+    withPartialMoveset: number;
+    withoutMoveset: number;
+    members: { rosterId: number; displayName: string; nickname: string | null; movesetSize: number }[];
+  };
 }
 
 /** One attacking type and what it does to a defender, in hundredths. */

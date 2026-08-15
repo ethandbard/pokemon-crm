@@ -539,6 +539,47 @@ export const roster = pgTable(
   ],
 );
 
+/**
+ * The moves a roster member actually has equipped — its moveset.
+ *
+ * This is the table that makes coverage analysis mean anything. `pokemon_moves`
+ * is what a species *can learn* (Charizard: 131 moves), which is why coverage
+ * computed from it reports almost every roster as covering almost every type.
+ * A battling Pokémon carries **four** moves, and those four are what determine
+ * whether a team can actually answer a threat.
+ *
+ * `slot` is 1–4, mirroring the games. Slots rather than an unordered set give
+ * stable display order and make "replace the move in slot 2" a natural edit.
+ *
+ * **Legality is enforced in the route, not here.** The rule is that `move_id`
+ * must appear in `pokemon_moves` for this entry's species — a constraint against
+ * a join, which a foreign key cannot express. `PUT /api/roster/:id/moves`
+ * validates it; nothing else may write this table.
+ */
+export const rosterMoves = pgTable(
+  'roster_moves',
+  {
+    id: serial('id').primaryKey(),
+    rosterId: integer('roster_id')
+      .notNull()
+      .references(() => roster.id, { onDelete: 'cascade' }),
+    moveId: integer('move_id')
+      .notNull()
+      .references(() => moves.id, { onDelete: 'cascade' }),
+    /** 1–4. Range is enforced by the route's Zod schema. */
+    slot: integer('slot').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('roster_moves_slot_idx').on(table.rosterId, table.slot),
+    // The same move twice is not a moveset, it is a mistake.
+    uniqueIndex('roster_moves_unique_idx').on(table.rosterId, table.moveId),
+    index('roster_moves_roster_idx').on(table.rosterId),
+    index('roster_moves_move_idx').on(table.moveId),
+  ],
+);
+
 export const pokemonRelations = relations(pokemon, ({ many }) => ({
   notes: many(notes),
   activity: many(activity),
@@ -559,9 +600,15 @@ export const trainersRelations = relations(trainers, ({ many }) => ({
   roster: many(roster),
 }));
 
-export const rosterRelations = relations(roster, ({ one }) => ({
+export const rosterRelations = relations(roster, ({ one, many }) => ({
   trainer: one(trainers, { fields: [roster.trainerId], references: [trainers.id] }),
   pokemon: one(pokemon, { fields: [roster.pokemonId], references: [pokemon.id] }),
+  moveset: many(rosterMoves),
+}));
+
+export const rosterMovesRelations = relations(rosterMoves, ({ one }) => ({
+  entry: one(roster, { fields: [rosterMoves.rosterId], references: [roster.id] }),
+  move: one(moves, { fields: [rosterMoves.moveId], references: [moves.id] }),
 }));
 
 export const notesRelations = relations(notes, ({ one }) => ({
@@ -592,3 +639,5 @@ export type PokemonMove = typeof pokemonMoves.$inferSelect;
 export type NewPokemonMove = typeof pokemonMoves.$inferInsert;
 export type TypeDamage = typeof typeDamage.$inferSelect;
 export type NewTypeDamage = typeof typeDamage.$inferInsert;
+export type RosterMove = typeof rosterMoves.$inferSelect;
+export type NewRosterMove = typeof rosterMoves.$inferInsert;

@@ -122,3 +122,110 @@ export function defensiveProfile(
 
   return profile;
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Roster analysis                                                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One roster member, reduced to what team analysis needs.
+ *
+ * `equippedMoveTypes` are the types of its **equipped, non-status** moves —
+ * from `roster_moves`, not `pokemon_moves`. That distinction is the entire
+ * point: what a species could learn says nothing about what this team can do.
+ * Status moves are excluded because a Grass-type status move gives no Grass
+ * coverage, matching the rule already used for movepool coverage.
+ */
+export interface RosterMember {
+  rosterId: number;
+  displayName: string;
+  nickname: string | null;
+  type1: string;
+  type2: string | null;
+  equippedMoveTypes: string[];
+  /** How many of the four slots are filled — readiness, not coverage. */
+  movesetSize: number;
+}
+
+export interface OffensiveCoverage {
+  /** The defending type being answered. */
+  type: string;
+  /** Best multiplier any equipped move achieves against it, in hundredths. */
+  bestMultiplier: number;
+  /** Members whose moveset contains that best answer. */
+  members: string[];
+}
+
+export interface DefensiveExposure {
+  /** The attacking type being taken. */
+  type: string;
+  /** Active members taking 2x or worse from it. */
+  weakCount: number;
+  /** Active members resisting or immune to it. */
+  resistCount: number;
+  /** Names of the exposed members, for the UI to name rather than count. */
+  weakMembers: string[];
+}
+
+/**
+ * What the roster can hit, from its **equipped** moves.
+ *
+ * Scored against the 18 single types, which is what "coverage" conventionally
+ * means. Scoring against every dual-type pairing is a different and much larger
+ * question (306 ordered combinations, most of which no species has) and is
+ * deliberately not attempted here.
+ *
+ * A type with no super-effective answer is a gap: the roster can still hit it,
+ * just never for extra damage.
+ */
+export function offensiveCoverage(chart: TypeChart, members: RosterMember[]): OffensiveCoverage[] {
+  return POKEMON_TYPES.map((defending) => {
+    let bestMultiplier = 0;
+    const providers: string[] = [];
+
+    for (const member of members) {
+      // The member's best answer to this type, across its equipped moves.
+      let memberBest = 0;
+      for (const moveType of member.equippedMoveTypes) {
+        const multiplier = chart.get(`${moveType}>${defending}`) ?? 100;
+        if (multiplier > memberBest) memberBest = multiplier;
+      }
+
+      if (memberBest > bestMultiplier) {
+        bestMultiplier = memberBest;
+        providers.length = 0;
+      }
+      if (memberBest === bestMultiplier && memberBest > 0) {
+        providers.push(member.nickname ?? member.displayName);
+      }
+    }
+
+    return { type: defending, bestMultiplier, members: providers };
+  });
+}
+
+/**
+ * What the roster is exposed to — how many members each attacking type hits
+ * hard, and how many shrug it off.
+ *
+ * A type that hits several members for 2x and is answered by none of their
+ * moves is the headline risk on a team, which is what `threats` in the API
+ * response surfaces.
+ */
+export function rosterVulnerabilities(
+  chart: TypeChart,
+  members: RosterMember[],
+): DefensiveExposure[] {
+  return POKEMON_TYPES.map((attacking) => {
+    const weakMembers: string[] = [];
+    let resistCount = 0;
+
+    for (const member of members) {
+      const multiplier = multiplierAgainst(chart, attacking, member.type1, member.type2);
+      if (multiplier > 100) weakMembers.push(member.nickname ?? member.displayName);
+      else if (multiplier < 100) resistCount += 1;
+    }
+
+    return { type: attacking, weakCount: weakMembers.length, resistCount, weakMembers };
+  });
+}

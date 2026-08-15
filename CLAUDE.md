@@ -84,6 +84,7 @@ pokemon-crm/
         │   ├── Modal.tsx     # native <dialog> wrapper + form field helpers
         │   ├── TrainerForm.tsx        # create/edit a trainer
         │   ├── RosterEditor.tsx       # add / edit / transfer roster entries
+        │   ├── MovesetEditor.tsx      # the four equipped moves, from the movepool
         │   ├── EvolutionProgress.tsx  # stage bar + full chain view
         │   ├── Movepool.tsx   # movepool by learn method, sortable + filterable
         │   ├── AttentionQueue.tsx     # ranked early-alert list with reasons
@@ -277,6 +278,24 @@ Notes and activity are **not** attached to trainers. A trainer's history is
 derived by joining through `roster`. Notes written *about a trainer* would need
 a new column or table — don't overload the existing ones.
 
+### `roster_moves`
+
+The moves a roster member **actually carries** — one row per filled slot, `slot`
+1–4. This is the table that makes coverage analysis mean anything.
+
+- **`roster_moves` is equipped; `pokemon_moves` is learnable.** Charizard can
+  learn 131 moves and carries four. Coverage computed from the learnable pool
+  reports nearly every roster as covering nearly every type, which is why the
+  old figure was useless for team building. Anything answering "can this team
+  handle X" must read `roster_moves`.
+- **Keyed on the roster entry, not the species** — two trainers carrying the
+  same Pokémon run different movesets.
+- **Legality is enforced in the route, not the schema.** A move must appear in
+  `pokemon_moves` for that entry's species — a constraint against a join, which
+  no foreign key can express. `PUT /api/roster/:id/moves` checks it and is the
+  only thing that may write this table.
+- Unique on `(roster_id, slot)` and on `(roster_id, move_id)`.
+
 ### `activity`
 
 Status flags: `caught`, `favorite`, `wishlist`, `flagged`, `reviewed` (Postgres
@@ -321,6 +340,9 @@ All routes are under `/api`. Responses are JSON; errors are
 | POST | `/api/trainers/:id/roster` | Add a Pokémon to that trainer's roster |
 | PATCH | `/api/roster/:id` | Update nickname/level/status, or move the entry to another trainer |
 | DELETE | `/api/roster/:id` | Remove a roster entry |
+| GET | `/api/roster/:id/moves` | The entry's equipped moveset, in slot order |
+| PUT | `/api/roster/:id/moves` | Replace the whole moveset (≤ 4 ids). Rejects duplicates and moves the species can't learn |
+| GET | `/api/trainers/:id/analysis` | Team analysis from **equipped** movesets — `offense`, `defense`, `gaps`, `threats`, `readiness` |
 | GET | `/api/notes` | Cross-Pokémon feed — `search` (note body **or** Pokémon name), `pokemonId`, `owner`, `trainerId`, `sort`, `direction`, pagination. Also returns `owners` and `trainers` for the filter dropdowns |
 | POST | `/api/notes` | Create |
 | PATCH | `/api/notes/:id` | Update body |
@@ -504,6 +526,32 @@ Consequences worth knowing:
 - Multipliers stay hundredths end to end; `effectivenessLabel` in
   `lib/format.ts` renders them (`200` → "2×", `50` → "½×", `0` → "No effect").
 
+### Roster analysis: equipped vs. learnable
+
+The distinction runs through the whole feature and is easy to reintroduce:
+
+- **Equipped** (`roster_moves`) answers "does this team work". It backs
+  `GET /api/trainers/:id/analysis`, the Team analysis card, and the roster
+  table's Moveset column.
+- **Learnable** (`pokemon_moves`) answers "what could this team become". It
+  backs the "Movepool coverage (potential)" card, which is **labelled as
+  potential** precisely because the unqualified version misled.
+
+A new figure about team strength reads `roster_moves`. If it reads
+`pokemon_moves`, it is a ceiling, and its label must say so.
+
+Rules the analysis follows, all in `server/src/effectiveness.ts`:
+
+- **Status moves give no coverage** — a Grass-type status move is not Grass
+  coverage. Same rule the movepool figures already used.
+- Coverage is scored against the **18 single types**, not every dual-type
+  pairing. That is what "coverage" conventionally means, and the pairwise
+  version is a much larger question.
+- A **gap** is a type nothing on the team hits for extra damage. A **threat** is
+  a type that hits 2+ members hard *and* is a gap — either alone is survivable.
+- The analysis endpoint scopes to the **active roster**, like every other
+  trainer aggregate.
+
 ### Needs-attention scoring
 
 `server/src/attention.ts`. **SQL gathers facts, TypeScript applies weights.**
@@ -645,7 +693,7 @@ Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
 - **build** — `npm ci`, `typecheck`, `build`, on Node 20 (the `engines` floor)
   and 22. `fail-fast` is off.
 - **migrations** — spins up a Postgres 16 service, runs `db:create` and
-  `db:migrate` **twice each**, and asserts all ten tables exist. Adding a table
+  `db:migrate` **twice each**, and asserts all eleven tables exist. Adding a table
   means adding it to that list.
 
 **CI does not seed** — that would be ~2,600 PokéAPI requests per push, against

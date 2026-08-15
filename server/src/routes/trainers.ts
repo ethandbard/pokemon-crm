@@ -2,9 +2,19 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { activity, moves, notes, pokemon, pokemonMoves, roster, trainers } from '../db/schema.js';
+import {
+  activity,
+  moves,
+  notes,
+  pokemon,
+  pokemonMoves,
+  roster,
+  rosterMoves,
+  trainers,
+} from '../db/schema.js';
 import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
 import { POKEMON_TYPES } from '../constants.js';
+import { loadTypeChart, offensiveCoverage, rosterVulnerabilities } from '../effectiveness.js';
 
 export const trainersRouter = Router();
 
@@ -358,10 +368,29 @@ trainersRouter.get(
               join ${moves} m on m.id = pm.move_id
               where pm.pokemon_id = ${roster}.pokemon_id and m.damage_class <> 'status'
             )`,
+            /*
+             * Slots filled, out of four. This is the *equipped* moveset, and
+             * it is keyed on the roster entry rather than the species — two
+             * trainers carrying the same Pokémon run different movesets.
+             */
+            movesetSize: sql<number>`(select count(*)::int from ${rosterMoves} rm where rm.roster_id = ${roster}.id)`,
+            /** Attacking types those equipped moves actually reach. */
+            movesetCoverage: sql<number>`(
+              select count(distinct m.type)::int
+              from ${rosterMoves} rm
+              join ${moves} m on m.id = rm.move_id
+              where rm.roster_id = ${roster}.id and m.damage_class <> 'status'
+            )`,
             noteCount: sql<number>`(select count(*)::int from ${notes} n where n.pokemon_id = ${roster}.pokemon_id)`,
+            /*
+             * DISTINCT matters: a flag is keyed on (pokemon, owner, kind), so
+             * a Pokémon reviewed by three users has three `reviewed` rows.
+             * Without it this column repeats the kind, which renders duplicate
+             * icons and hands React duplicate keys for the same list.
+             */
             activityKinds: sql<
               string[]
-            >`coalesce((select array_agg(a.kind::text order by a.kind::text) from ${activity} a where a.pokemon_id = ${roster}.pokemon_id), '{}')`,
+            >`coalesce((select array_agg(distinct a.kind::text) from ${activity} a where a.pokemon_id = ${roster}.pokemon_id), '{}')`,
           })
           .from(roster)
           .innerJoin(pokemon, eq(roster.pokemonId, pokemon.id))
@@ -581,6 +610,111 @@ trainersRouter.get(
         query.historyPageSize,
         activityTotals?.count ?? 0,
       ),
+    });
+  }),
+);
+
+/**
+ * A member of the active roster with its **equipped** move types — the input to
+ * every figure on the analysis endpoint below.
+ *
+ * The left join to `roster_moves` is deliberate: a member with no moveset must
+ * still appear, contributing its defensive typing and counting against
+ * readiness. Inner-joining would quietly drop exactly the members the readiness
+ * report exists to find.
+ */
+interface AnalysisRow {
+  rosterId: number;
+  displayName: string;
+  nickname: string | null;
+  type1: string;
+  type2: string | null;
+  movesetSize: number;
+  equippedMoveTypes: string[];
+}
+
+/**
+ * GET /api/trainers/:id/analysis — how good is this team, actually.
+ *
+ * Separate from the dashboard payload above, which already runs 15+ queries and
+ * returns 11 keys. Both the trainer dashboard and the team page read this.
+ *
+ * Everything here is scoped to the **active roster** (`status <> 'retired'`),
+ * matching every other aggregate on the trainer dashboard.
+ */
+trainersRouter.get(
+  '/:id/analysis',
+  asyncHandler(async (req, res) => {
+    const { id } = idParamSchema.parse(req.params);
+
+    const [trainer] = await db
+      .select({ id: trainers.id, name: trainers.name })
+      .from(trainers)
+      .where(eq(trainers.id, id))
+      .limit(1);
+    if (!trainer) throw notFound(`No trainer with id ${id}`);
+
+    const rows = await db.execute(sql`
+      select
+        r.id                                             as "rosterId",
+        p.display_name                                   as "displayName",
+        r.nickname                                       as "nickname",
+        p.type1                                          as "type1",
+        p.type2                                          as "type2",
+        count(rm.id)::int                                as "movesetSize",
+        -- Damaging moves only: a Grass-type status move gives no Grass
+        -- coverage. A filter clause yields null when nothing matches, so the
+        -- coalesce turns "no equipped moves" into an empty array, not a null.
+        coalesce(
+          array_agg(distinct m.type) filter (where m.damage_class <> 'status'),
+          '{}'
+        )                                                as "equippedMoveTypes"
+      from ${roster} r
+      join ${pokemon} p on p.id = r.pokemon_id
+      left join ${rosterMoves} rm on rm.roster_id = r.id
+      left join ${moves} m on m.id = rm.move_id
+      where r.trainer_id = ${id} and r.status <> 'retired'
+      group by r.id, p.display_name, r.nickname, p.type1, p.type2
+      order by p.display_name
+    `);
+
+    const members = rows.rows as unknown as AnalysisRow[];
+    const chart = await loadTypeChart();
+
+    const offense = offensiveCoverage(chart, members);
+    const defense = rosterVulnerabilities(chart, members);
+
+    // A gap is a type nothing on the team hits for extra damage. The team can
+    // still attack it — it just never gets the advantage.
+    const gaps = offense.filter((entry) => entry.bestMultiplier <= 100).map((entry) => entry.type);
+
+    // A threat hits more than one member hard AND has no super-effective
+    // answer. Either alone is survivable; together is what loses a match, and
+    // it is the one thing this whole endpoint exists to surface.
+    const gapSet = new Set(gaps);
+    const threats = defense
+      .filter((entry) => entry.weakCount >= 2 && gapSet.has(entry.type))
+      .sort((a, b) => b.weakCount - a.weakCount || a.type.localeCompare(b.type));
+
+    res.json({
+      trainer,
+      offense,
+      defense,
+      gaps,
+      threats,
+      readiness: {
+        activeMembers: members.length,
+        /** Slots filled across the roster, out of four per member. */
+        withFullMoveset: members.filter((m) => m.movesetSize === 4).length,
+        withPartialMoveset: members.filter((m) => m.movesetSize > 0 && m.movesetSize < 4).length,
+        withoutMoveset: members.filter((m) => m.movesetSize === 0).length,
+        members: members.map((m) => ({
+          rosterId: m.rosterId,
+          displayName: m.displayName,
+          nickname: m.nickname,
+          movesetSize: m.movesetSize,
+        })),
+      },
     });
   }),
 );
