@@ -1,6 +1,8 @@
 import type { Request } from 'express';
 import { z } from 'zod';
+import { eq, sql } from 'drizzle-orm';
 import { DEFAULT_OWNER } from './constants.js';
+import { trainers } from './db/schema.js';
 
 /**
  * Who a write is attributed to.
@@ -24,4 +26,34 @@ export function ownerFor(req: Request, bodyOwner?: string | null): string {
   const header = req.get(ACTING_USER_HEADER);
   const parsed = header ? ownerSchema.safeParse(header) : null;
   return parsed?.success ? parsed.data : DEFAULT_OWNER;
+}
+
+/** `?scope=` on trainer-aware lists. Defaults to the acting user's own. */
+export const scopeSchema = z.enum(['mine', 'all']).default('mine');
+export type TrainerScope = z.infer<typeof scopeSchema>;
+
+/**
+ * The predicate every trainer-aware read filters by, as a single expression.
+ *
+ * Returns `undefined` for `scope=all`, which callers treat as "no extra
+ * condition" — so a caller can always write
+ * `and(...filters, trainerScope(req, scope))` and let Drizzle drop the
+ * undefined.
+ *
+ * **This exists so the condition is written once.** There are four independent
+ * `trainerOptions` queries across the routes plus joins in `attention.ts`,
+ * `moves.ts` and `stats.ts`; eight hand-written copies of `owner = ?` is how
+ * one of them ends up scoping differently from the rest.
+ *
+ * Scoping is **visibility, not security** — the acting user is an unverified
+ * header. See `trainers.owner` in schema.ts.
+ */
+export function trainerScope(req: Request, scope: TrainerScope) {
+  return scope === 'all' ? undefined : eq(trainers.owner, ownerFor(req));
+}
+
+/** The same predicate as raw SQL, for the routes that build `sql` fragments. */
+export function trainerScopeSql(req: Request, scope: TrainerScope, alias = 'trainers') {
+  if (scope === 'all') return sql`true`;
+  return sql`${sql.identifier(alias)}.owner = ${ownerFor(req)}`;
 }

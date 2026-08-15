@@ -5,6 +5,7 @@ import { useApi, useDebounced } from '../lib/useApi';
 import type { MovesResponse, PokemonListResponse, TrainerListItem } from '../lib/types';
 import { dexNumber } from '../lib/format';
 import { useHotkey } from './Toast';
+import { useCurrentUser } from '../lib/useCurrentUser';
 
 interface Command {
   id: string;
@@ -45,6 +46,7 @@ export function CommandPalette() {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const navigate = useNavigate();
+  const { scope } = useCurrentUser();
 
   useHotkey(isPaletteHotkey, () => setOpen((current) => !current));
 
@@ -57,7 +59,11 @@ export function CommandPalette() {
     ? `/api/pokemon${toQueryString({ search: trimmed, pageSize: 6 })}`
     : null;
   const movePath = trimmed ? `/api/moves${toQueryString({ search: trimmed, pageSize: 5 })}` : null;
-  const trainerPath = trimmed ? `/api/trainers${toQueryString({ search: trimmed })}` : null;
+  // Jumping to a trainer you cannot edit is a dead end, so the palette follows
+  // the same scope as every other trainer surface.
+  const trainerPath = trimmed
+    ? `/api/trainers${toQueryString({ search: trimmed, scope })}`
+    : null;
 
   const pokemonResults = useApi<PokemonListResponse>(pokemonPath);
   const moveResults = useApi<MovesResponse>(movePath);

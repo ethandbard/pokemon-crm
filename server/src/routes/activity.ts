@@ -95,6 +95,7 @@ activityRouter.get(
         .select({ kind: activity.kind, count: sql<number>`count(*)::int` })
         .from(activity)
         .groupBy(activity.kind),
+      // Not owner-scoped — see the matching note in routes/notes.ts.
       db.select({ id: trainers.id, name: trainers.name }).from(trainers).orderBy(asc(trainers.name)),
     ]);
 

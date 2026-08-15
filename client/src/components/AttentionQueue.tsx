@@ -13,6 +13,7 @@ import { Card, EmptyState, ErrorState, Loading } from './ui';
 import { dexNumber } from '../lib/format';
 import { MovesetEditor } from './MovesetEditor';
 import { useToast } from './Toast';
+import { useCurrentUser } from '../lib/useCurrentUser';
 
 /**
  * Reason presentation. Colour is *not* the only channel — each reason ships an
@@ -65,9 +66,10 @@ export function AttentionQueue({
   /** Show which trainer each item belongs to — on for the workspace view. */
   showTrainer?: boolean;
 }) {
+  const { scope } = useCurrentUser();
   const path = useMemo(
-    () => `/api/attention${toQueryString({ trainerId, limit })}`,
-    [trainerId, limit],
+    () => `/api/attention${toQueryString({ trainerId, limit, scope })}`,
+    [trainerId, limit, scope],
   );
   const { data, loading, error, refetch } = useApi<AttentionResponse>(path);
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -291,22 +293,13 @@ function AttentionRow({
     }
   }
 
-  async function flag() {
-    setBusy(true);
-    try {
-      await api.post('/api/activity/toggle', { pokemonId: item.pokemonId, kind: 'flagged' });
-      // Deliberately says what it does NOT do: flags no longer feed the queue,
-      // so a user would otherwise expect this row to change and it will not.
-      toast(`Flagged ${name} — visible on Activity; does not affect this ranking`, {
-        tone: 'success',
-      });
-      onChanged();
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'Could not flag', { tone: 'error' });
-    } finally {
-      setBusy(false);
-    }
-  }
+  /*
+   * No Flag action here on purpose. `flagged` stopped being an attention
+   * signal when the model was reworked, so a Flag button in a ranking widget
+   * would write a row and leave the ranking untouched — an action that looks
+   * like it did nothing. Flags still live on the Profile and Activity page.
+   * If `flagged` ever becomes a signal again, this is where it belongs.
+   */
 
   return (
     <li className="rounded-lg border border-hairline">
@@ -412,9 +405,6 @@ function AttentionRow({
             </button>
             <button type="button" onClick={markReviewed} disabled={busy} className={actionClass}>
               Mark reviewed
-            </button>
-            <button type="button" onClick={flag} disabled={busy} className={actionClass}>
-              Flag
             </button>
             <Link to={`/pokemon/${item.pokemonId}`} className={actionClass}>
               Pokémon page

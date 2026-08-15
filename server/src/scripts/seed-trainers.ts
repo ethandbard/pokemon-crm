@@ -250,7 +250,15 @@ async function main() {
   let rosterRows = 0;
   const skipped: string[] = [];
 
-  for (const spec of TRAINERS) {
+  for (const [index, spec] of TRAINERS.entries()) {
+    /*
+     * Spread trainers across the seeded users, same round-robin the review
+     * history uses, so the "mine vs all" scoping has something to distinguish
+     * on a fresh database. `spec.email` is the trainer's own contact address
+     * and is deliberately NOT used here — see schema.ts § trainers.
+     */
+    const owner = SEED_OWNERS[index % SEED_OWNERS.length]!;
+
     const [trainer] = await db
       .insert(trainers)
       .values({
@@ -258,6 +266,7 @@ async function main() {
         region: spec.region,
         specialty: spec.specialty,
         email: spec.email,
+        owner,
         bio: spec.bio,
         updatedAt: new Date(),
       })
@@ -267,6 +276,9 @@ async function main() {
           region: sql`excluded.region`,
           specialty: sql`excluded.specialty`,
           email: sql`excluded.email`,
+          // Re-running the seed re-attributes the demo trainers, which is what
+          // makes a stale local database line up with a fresh one.
+          owner: sql`excluded.owner`,
           bio: sql`excluded.bio`,
           updatedAt: sql`now()`,
         },

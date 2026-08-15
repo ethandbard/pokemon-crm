@@ -13,7 +13,7 @@ import { Modal, Field, fieldClass } from './Modal';
  * writing as. It is attribution only — no password, no permissions.
  */
 export function UserSwitcher() {
-  const { user, users, email, loading, switchTo, refresh } = useCurrentUser();
+  const { user, users, email, loading, switchTo, refresh, scope, setScope } = useCurrentUser();
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -109,9 +109,36 @@ export function UserSwitcher() {
             </button>
           </div>
 
+          {/* Scope lives beside the user because it only means anything
+              relative to one: "mine" is whoever is selected above. */}
+          <div className="mt-1 border-t border-hairline pt-2">
+            <p className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Trainers shown
+            </p>
+            <div className="flex gap-1 px-2 pb-1">
+              {(['mine', 'all'] as const).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={scope === option}
+                  onClick={() => setScope(option)}
+                  className={[
+                    'flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
+                    scope === option
+                      ? 'bg-brand/10 text-brand'
+                      : 'text-muted hover:bg-plane hover:text-ink',
+                  ].join(' ')}
+                >
+                  {option === 'mine' ? 'Mine' : 'All trainers'}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <p className="px-3 pb-2 pt-1 text-[11px] leading-snug text-muted">
-            Attribution only — there is no sign-in, and everyone sees the whole
-            workspace.
+            Attribution only — there is no sign-in. Switching user hands you
+            their trainers. Notes and activity stay visible to everyone.
           </p>
         </div>
       )}

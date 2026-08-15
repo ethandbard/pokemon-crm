@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../lib/api';
+import { api, toQueryString } from '../lib/api';
 import { useApi } from '../lib/useApi';
 import type { ActivityKind, TrainerListItem } from '../lib/types';
 import { ACTIVITY_META } from '../lib/format';
@@ -34,7 +34,14 @@ export function BulkActionBar({
   const [error, setError] = useState<string | null>(null);
 
   // Only fetched once the roster dialog is actually opened.
-  const trainers = useApi<{ data: TrainerListItem[] }>(rosterOpen ? '/api/trainers' : null);
+  /*
+   * Always `scope=mine`, never the toggle: this dropdown is a WRITE target, and
+   * the server rejects adding to a trainer you do not own. Offering someone
+   * else's roster here would be an option that can only fail.
+   */
+  const trainers = useApi<{ data: TrainerListItem[] }>(
+    rosterOpen ? `/api/trainers${toQueryString({ scope: 'mine' })}` : null,
+  );
 
   const count = selectedIds.length;
   if (count === 0) return null;

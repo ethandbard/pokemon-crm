@@ -82,6 +82,11 @@ notesRouter.get(
         .innerJoin(pokemon, eq(notes.pokemonId, pokemon.id))
         .where(where),
       db.selectDistinct({ owner: notes.owner }).from(notes).orderBy(asc(notes.owner)),
+      /*
+       * Deliberately NOT owner-scoped. Notes are workspace-visible by design,
+       * so a filter that could only reach your own trainers would be unable to
+       * narrow rows you can plainly see. Same reasoning on the Activity page.
+       */
       db.select({ id: trainers.id, name: trainers.name }).from(trainers).orderBy(asc(trainers.name)),
     ]);
 

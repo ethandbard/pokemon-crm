@@ -15,6 +15,7 @@ import { Card, EmptyState, ErrorState, Loading, StatTile, TypeBadge } from '../c
 import { PageHeader } from '../components/PageHeader';
 import { effectivenessLabel, titleCase } from '../lib/format';
 import { PAGE_CONTAINER } from '../lib/page';
+import { useCurrentUser } from '../lib/useCurrentUser';
 import { BAR_RADIUS, SERIES_1, axisProps, tooltipProps } from '../lib/charts';
 
 /**
@@ -32,7 +33,8 @@ export function TeamPage() {
 
   // Unpaginated by design — it backs a select control. Same call the Trainers
   // page makes, so it is warm in the cache when arriving from there.
-  const list = useApi<{ data: TrainerListItem[] }>('/api/trainers');
+  const { scope } = useCurrentUser();
+  const list = useApi<{ data: TrainerListItem[] }>(`/api/trainers${toQueryString({ scope })}`);
 
   return (
     <div className={PAGE_CONTAINER}>

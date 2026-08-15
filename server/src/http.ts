@@ -14,6 +14,15 @@ export class HttpError extends Error {
 
 export const notFound = (message: string) => new HttpError(404, message);
 export const badRequest = (message: string) => new HttpError(400, message);
+/**
+ * Writing to something the acting user does not own.
+ *
+ * 403 rather than 404: the resource exists and the client may well be able to
+ * see it (trainers are visible with `scope=all`), so pretending otherwise would
+ * make the switcher look broken. Note this is enforcement of a **convention** —
+ * the acting user is an unverified header, not an authenticated identity.
+ */
+export const forbidden = (message: string) => new HttpError(403, message);
 
 /**
  * Wraps an async handler so rejected promises reach the error middleware

@@ -260,6 +260,36 @@ whole workspace.
 `owner` holds the acting user's email — see `users` above. Writes that name no
 acting user fall back to `DEFAULT_OWNER` (`server/src/constants.ts`).
 
+### Trainer ownership
+
+`trainers.owner` holds a `users.email` — who manages that trainer.
+
+- ⚠️ **Not `trainers.email`.** That column already existed and is the trainer's
+  *own contact address* (`ash@pokemon-crm.local`), a different namespace from
+  `SEED_USERS`. Overloading it would silently re-attribute every trainer.
+- **Visibility, not security.** The acting user is an unverified header, so this
+  scopes and guards by convention. Switching users hands you their trainers, and
+  the UI copy says so.
+- **Reads scope; writes guard.** `?scope=mine|all` (default `mine`) filters
+  trainer-aware lists. Writes to a trainer you don't own return **403** — from
+  `assertOwned` in `routes/trainers.ts` and `assertOwnsTrainer` in
+  `routes/roster.ts`, which is where all six write paths funnel. A transfer must
+  clear **both** ends.
+- **The predicate is written once**, as `trainerScope` / `trainerScopeSql` in
+  `owner.ts`. It is applied in `routes/trainers.ts`, `pokemon.ts` (Lookup's
+  trainer filter), `moves.ts`, and `attention.ts`. Add a new trainer-aware query
+  and it uses the helper — eight hand-written copies is how one drifts.
+- **Notes and Activity are deliberately unscoped**, including their trainer
+  filter dropdowns: those pages are workspace-visible, so a filter that could
+  only reach your own trainers couldn't narrow rows you can plainly see.
+- **`stats.ts` needs no scoping** — the dex-wide dashboard never referenced
+  trainers at all.
+- **`BulkActionBar` always requests `scope=mine`**, ignoring the toggle: its
+  dropdown is a *write* target, and offering a trainer you can't write to is an
+  option that can only fail.
+- The client mirrors the rule rather than duplicating it: `isMine` on the
+  trainer dashboard disables every write control and names the owner.
+
 ### `trainers` and `roster`
 
 Advising analogy: trainer = advisor, roster = caseload, Pokémon = student.
@@ -331,7 +361,7 @@ All routes are under `/api`. Responses are JSON; errors are
 | POST | `/api/users` | Create a user |
 | PATCH | `/api/users/:id` | Update `name` / `role` / `initials`. **Not `email`** |
 | DELETE | `/api/users/:id` | Remove the identity; their notes and flags stay. Refuses on `DEFAULT_OWNER` |
-| GET | `/api/trainers` | All trainers with roster size and mean BST — `search` (name, region, specialty). Unpaginated: it backs a select control |
+| GET | `/api/trainers` | Trainers with roster size and mean BST — `search` (name, region, specialty), `scope=mine\|all` (default `mine`). Unpaginated: it backs a select control |
 | GET | `/api/attention` | Needs-attention queue — `trainerId` (omit for workspace-wide), `limit`. Returns each item's `score` and `reasons`, trainer-level `alerts` + `alertsTotal`, plus the `model` constants |
 | POST | `/api/activity/bulk` | Set or clear one flag across many Pokémon (explicit target state, not a toggle) |
 | POST | `/api/notes/bulk` | Write the same note against many Pokémon |
@@ -455,8 +485,10 @@ All routes are under `/api`. Responses are JSON; errors are
   queue's only affordance used to be the Pokémon's name, which leads to its
   profile — a page with no roster attachment and therefore no way to edit the
   moveset the queue was asking for. Each row now carries named actions (Set
-  moves, Mark reviewed, Flag, and links to the profile and roster), and the
-  moveset editor opens over the queue so it re-ranks without navigating away.
+  moves, Mark reviewed, and links to the profile and roster), and the moveset
+  editor opens over the queue so it re-ranks without navigating away.
+  **Every action there changes the ranking** — a Flag button was removed for
+  exactly that reason once `flagged` stopped being a signal.
 - **Response types are hand-written** in `lib/types.ts`. If you change a route's
   response shape, update the matching interface.
 - **`Paginator` takes the API's `pagination` object whole**, not spread fields,
@@ -695,6 +727,10 @@ Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
   config as CJS, which can't load the ESM-only `env.ts` (`import.meta.url`). The
   config reads `.env` directly. An env var both need must be added in both
   places.
+- **`db/schema.ts` must not import anything but drizzle**, for the same reason —
+  drizzle-kit loads it as CJS and `MODULE_NOT_FOUND`s on `../constants.js`.
+  `trainers.owner` therefore repeats `DEFAULT_OWNER` as a literal default; keep
+  the two in step by hand.
 - **The scrolling `<main>` in `App.tsx` must stay `relative`.** `.sr-only` is
   `position: absolute`, so without a positioned ancestor those elements resolve
   against the document, sit outside `main`'s overflow clipping, and stretch
@@ -758,4 +794,5 @@ proxy that forwards `/api` to the Express server.
 ## Not yet built
 
 See [TODO.md](TODO.md). In short: no auth (users are an unverified "acting as"
-switcher — see § `users`), no tests, no dark mode, and a single ~720 kB JS chunk.
+switcher — see § `users` and § Trainer ownership), no tests, no dark mode, and a
+single ~740 kB JS chunk.

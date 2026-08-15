@@ -183,7 +183,14 @@ export interface Trainer {
   name: string;
   region: string | null;
   specialty: string | null;
+  /** The trainer's own contact address — **not** the managing user. */
   email: string | null;
+  /**
+   * The `users.email` of whoever manages this trainer. Compare against the
+   * acting email to decide whether write controls are enabled; the API
+   * enforces the same rule with a 403.
+   */
+  owner: string;
   bio: string | null;
 }
 

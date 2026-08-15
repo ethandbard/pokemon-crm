@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { and, asc, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { moves, pokemon, pokemonMoves, roster, rosterMoves, trainers } from '../db/schema.js';
-import { asyncHandler, badRequest, notFound } from '../http.js';
+import { asyncHandler, badRequest, forbidden, notFound } from '../http.js';
+import { ownerFor } from '../owner.js';
 
 /**
  * Mutations on individual roster entries. Creating one lives on the trainer
@@ -13,6 +14,27 @@ import { asyncHandler, badRequest, notFound } from '../http.js';
 export const rosterRouter = Router();
 
 const idParamSchema = z.object({ id: z.coerce.number().int().min(1) });
+
+/**
+ * Refuses when the acting user does not own the trainer this entry belongs to.
+ *
+ * Roster entries have no owner of their own — they inherit the trainer's, so
+ * ownership is always one join away. A transfer has to clear **both** sides:
+ * you cannot push a Pokémon onto someone else's roster, and you cannot pull one
+ * off theirs.
+ */
+async function assertOwnsTrainer(req: Parameters<typeof ownerFor>[0], trainerId: number) {
+  const [trainer] = await db
+    .select({ name: trainers.name, owner: trainers.owner })
+    .from(trainers)
+    .where(eq(trainers.id, trainerId))
+    .limit(1);
+
+  if (!trainer) throw badRequest(`No trainer with id ${trainerId}`);
+  if (trainer.owner !== ownerFor(req)) {
+    throw forbidden(`${trainer.name} belongs to another user — switch to them to make changes`);
+  }
+}
 
 const patchSchema = z
   .object({
@@ -39,14 +61,12 @@ rosterRouter.patch(
 
     const [entry] = await db.select().from(roster).where(eq(roster.id, id)).limit(1);
     if (!entry) throw notFound(`No roster entry with id ${id}`);
+    await assertOwnsTrainer(req, entry.trainerId);
 
     if (input.trainerId !== undefined && input.trainerId !== entry.trainerId) {
-      const [trainer] = await db
-        .select({ id: trainers.id })
-        .from(trainers)
-        .where(eq(trainers.id, input.trainerId))
-        .limit(1);
-      if (!trainer) throw badRequest(`No trainer with id ${input.trainerId}`);
+      // Both ends of a transfer must be yours. This also proves the
+      // destination exists, so no separate existence check is needed.
+      await assertOwnsTrainer(req, input.trainerId);
 
       // The destination roster may already carry this Pokémon; the unique
       // index would reject it, so say so plainly instead.
@@ -136,11 +156,12 @@ rosterRouter.put(
     const { moveIds } = movesetSchema.parse(req.body);
 
     const [entry] = await db
-      .select({ id: roster.id, pokemonId: roster.pokemonId })
+      .select({ id: roster.id, pokemonId: roster.pokemonId, trainerId: roster.trainerId })
       .from(roster)
       .where(eq(roster.id, id))
       .limit(1);
     if (!entry) throw notFound(`No roster entry with id ${id}`);
+    await assertOwnsTrainer(req, entry.trainerId);
 
     if (new Set(moveIds).size !== moveIds.length) {
       throw badRequest('A moveset cannot carry the same move twice');
@@ -197,6 +218,15 @@ rosterRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const { id } = idParamSchema.parse(req.params);
+
+    const [entry] = await db
+      .select({ trainerId: roster.trainerId })
+      .from(roster)
+      .where(eq(roster.id, id))
+      .limit(1);
+    if (!entry) throw notFound(`No roster entry with id ${id}`);
+    await assertOwnsTrainer(req, entry.trainerId);
+
     const [deleted] = await db.delete(roster).where(eq(roster.id, id)).returning({ id: roster.id });
     if (!deleted) throw notFound(`No roster entry with id ${id}`);
     res.status(204).end();

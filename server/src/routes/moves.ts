@@ -5,6 +5,7 @@ import { db } from '../db/client.js';
 import { moves, pokemon, pokemonMoves, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
 import { POKEMON_TYPES } from '../constants.js';
+import { scopeSchema, trainerScopeSql } from '../owner.js';
 
 export const movesRouter = Router();
 
@@ -179,6 +180,8 @@ const learnerQuerySchema = z.object({
   learnMethod: z.string().trim().max(40).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(25),
+  /** Scopes the "trainers who can field this move" block. */
+  scope: scopeSchema,
 });
 
 /**
@@ -273,7 +276,7 @@ movesRouter.get(
             count(*)::int                                            as active_roster
           from ${roster} r
           join ${trainers} t on t.id = r.trainer_id
-          where r.status <> 'retired'
+          where r.status <> 'retired' and ${trainerScopeSql(req, query.scope, 't')}
           group by t.id, t.name
           having count(*) filter (where exists (
             select 1 from ${pokemonMoves} pm

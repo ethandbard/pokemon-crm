@@ -496,7 +496,30 @@ export const trainers = pgTable(
     region: text('region'),
     /** Type the trainer is known for — the rough equivalent of a department. */
     specialty: text('specialty'),
+    /**
+     * The trainer's **own contact address** (`ash@pokemon-crm.local`) — display
+     * data, editable in the form.
+     *
+     * ⚠️ This is NOT the owning user. That is `owner` below, and the two are
+     * different namespaces: `SEED_USERS` emails have no relationship to these.
+     * Overloading this column would silently re-attribute every trainer.
+     */
     email: text('email'),
+    /**
+     * The user who manages this trainer — a `users.email`, same convention as
+     * `notes.owner` and `activity.owner`, and deliberately no foreign key for
+     * the same reason (see `users`).
+     *
+     * **Attribution, not authorisation.** Nothing verifies the acting user, so
+     * this scopes and guards by convention: switching users in the switcher
+     * grants you their trainers. It is the honest ceiling until real auth.
+     *
+     * The default is `DEFAULT_OWNER` from `constants.ts`, written as a literal
+     * because **this file must not import anything but drizzle** — drizzle-kit
+     * bundles it as CJS and cannot resolve the ESM-only `../constants.js`.
+     * Keep the two in step by hand; the value is stable.
+     */
+    owner: text('owner').notNull().default('demo@pokemon-crm.local'),
     bio: text('bio'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -504,6 +527,8 @@ export const trainers = pgTable(
   (table) => [
     uniqueIndex('trainers_name_idx').on(table.name),
     index('trainers_region_idx').on(table.region),
+    // Every trainer-aware list filters on this by default.
+    index('trainers_owner_idx').on(table.owner),
   ],
 );
 

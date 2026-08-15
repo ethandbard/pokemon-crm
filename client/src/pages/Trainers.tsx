@@ -54,10 +54,11 @@ export function TrainersPage() {
   const selectedId = searchParams.get('trainerId');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounced(search);
+  const { scope } = useCurrentUser();
 
   const listPath = useMemo(
-    () => `/api/trainers${toQueryString({ search: debouncedSearch })}`,
-    [debouncedSearch],
+    () => `/api/trainers${toQueryString({ search: debouncedSearch, scope })}`,
+    [debouncedSearch, scope],
   );
   const list = useApi<{ data: TrainerListItem[] }>(listPath);
   const [creating, setCreating] = useState(false);
@@ -355,7 +356,7 @@ function TrainerDashboard({
   const [actionError, setActionError] = useState<string | null>(null);
   const [rosterView, setRosterView] = useState<'table' | 'board'>('table');
   // The two history tables show raw `owner` emails otherwise.
-  const { labelFor } = useCurrentUser();
+  const { labelFor, email: actingEmail } = useCurrentUser();
 
   if (loading && !data) return <Loading label="Loading roster…" />;
   if (error) return <ErrorState message={error} onRetry={refetch} />;
@@ -372,6 +373,13 @@ function TrainerDashboard({
     notes,
     activity,
   } = data;
+
+  /*
+   * Ownership is a convention enforced by the API (403 on a foreign trainer),
+   * so the UI mirrors it rather than duplicating it: every write control below
+   * is disabled when this trainer belongs to someone else.
+   */
+  const isMine = trainer.owner === actingEmail;
 
   const typeData = typeBreakdown.map((row) => ({ ...row, type: titleCase(row.type) }));
   const eligible = roster.filter((m) => m.milestoneEligible);
@@ -427,6 +435,11 @@ function TrainerDashboard({
               {trainer.email && ` · ${trainer.email}`}
             </p>
             {trainer.bio && <p className="mt-2 max-w-2xl text-sm text-ink-2">{trainer.bio}</p>}
+            {!isMine && (
+              <p className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-hairline bg-plane px-2 py-1 text-xs text-muted">
+                Managed by {labelFor(trainer.owner)} — read only. Switch to them to make changes.
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
@@ -435,10 +448,15 @@ function TrainerDashboard({
             >
               Open roster in Lookup →
             </Link>
-            <Button onClick={() => setEditing(true)} disabled={busy}>
+            {/*
+              Under "All trainers" you can open someone else's roster. Every
+              write would 403, so the controls are disabled and say why rather
+              than failing on click.
+            */}
+            <Button onClick={() => setEditing(true)} disabled={busy || !isMine}>
               Edit
             </Button>
-            <Button variant="danger" onClick={deleteTrainer} disabled={busy}>
+            <Button variant="danger" onClick={deleteTrainer} disabled={busy || !isMine}>
               Delete
             </Button>
           </div>
@@ -569,7 +587,7 @@ function TrainerDashboard({
             title="This trainer has an empty roster"
             description="No Pokémon are assigned yet, so there are no stats to show."
             action={
-              <Button variant="primary" onClick={() => setAdding(true)}>
+              <Button variant="primary" onClick={() => setAdding(true)} disabled={!isMine}>
                 + Add the first Pokémon
               </Button>
             }
@@ -602,7 +620,7 @@ function TrainerDashboard({
                     </button>
                   ))}
                 </div>
-                <Button variant="primary" onClick={() => setAdding(true)} disabled={busy}>
+                <Button variant="primary" onClick={() => setAdding(true)} disabled={busy || !isMine}>
                   + Add Pokémon
                 </Button>
               </div>
@@ -718,7 +736,7 @@ function TrainerDashboard({
                           <button
                             type="button"
                             onClick={() => setEditingMoveset(member)}
-                            disabled={busy}
+                            disabled={busy || !isMine}
                             className={`font-medium hover:text-brand disabled:opacity-50 ${
                               member.movesetSize === 0 ? 'text-status-critical' : 'text-ink'
                             }`}
@@ -760,7 +778,7 @@ function TrainerDashboard({
                           <button
                             type="button"
                             onClick={() => setEditingMoveset(member)}
-                            disabled={busy}
+                            disabled={busy || !isMine}
                             aria-label={`Edit moveset for ${member.nickname ?? member.displayName}`}
                             className="text-xs text-muted hover:text-brand disabled:opacity-50"
                           >
@@ -769,7 +787,7 @@ function TrainerDashboard({
                           <button
                             type="button"
                             onClick={() => setEditingMember(member)}
-                            disabled={busy}
+                            disabled={busy || !isMine}
                             className="ml-3 text-xs text-muted hover:text-brand disabled:opacity-50"
                           >
                             Edit
@@ -777,7 +795,7 @@ function TrainerDashboard({
                           <button
                             type="button"
                             onClick={() => removeMember(member)}
-                            disabled={busy}
+                            disabled={busy || !isMine}
                             className="ml-3 text-xs text-muted hover:text-status-critical disabled:opacity-50"
                           >
                             Remove

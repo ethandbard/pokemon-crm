@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getAttentionQueue, getRosterAlerts } from '../attention.js';
 import { ATTENTION } from '../constants.js';
 import { asyncHandler } from '../http.js';
+import { scopeSchema, trainerScopeSql } from '../owner.js';
 
 export const attentionRouter = Router();
 
@@ -19,12 +20,16 @@ attentionRouter.get(
       .object({
         trainerId: z.coerce.number().int().min(1).optional(),
         limit: z.coerce.number().int().min(1).max(200).optional(),
+        scope: scopeSchema,
       })
       .parse(req.query);
 
+    // Both queries alias the trainers table as `t`.
+    const scope = trainerScopeSql(req, query.scope, 't');
+
     const [{ items, scanned }, allAlerts] = await Promise.all([
-      getAttentionQueue(query),
-      getRosterAlerts(query.trainerId),
+      getAttentionQueue({ ...query, scope }),
+      getRosterAlerts(query.trainerId, scope),
     ]);
 
     /*

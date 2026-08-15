@@ -1,8 +1,8 @@
 # TODO
 
 Items 1, 2, 3a, 3c, 4, 5 and 6 are done. **Item 7 — the roster-building pivot —
-is the live work**; phases 7a–7c have landed, 7d (ownership) is next. 3b's
-remaining bullets are parked behind it.
+is complete** — all four phases landed. 3b's remaining bullets (varieties,
+encounters, abilities) are the next unclaimed work.
 
 ---
 
@@ -207,20 +207,31 @@ Nothing reads `growth_rates` (600 rows) any more; the table stays seeded.
 Evolution readiness survives as the trainer dashboard's "Ready to evolve" card —
 it is no longer an alert, which is the distinction.
 
-### 7d. Trainer ownership — next
+### ✅ 7d. Trainer ownership — DONE
 
-`trainers.owner`, scoped to the acting user by default with an "All trainers"
-toggle. **Not `trainers.email`** — that column already exists and is the
-trainer's own contact address.
+Migration `0009_narrow_jack_murdock.sql` adds `trainers.owner`. Reads take
+`?scope=mine|all` (default `mine`); writes to a trainer you don't own return
+403 from `assertOwned` / `assertOwnsTrainer`, and a transfer must clear both
+ends. The predicate lives once in `owner.ts` as `trainerScope` /
+`trainerScopeSql`. Full rules in CLAUDE.md § Trainer ownership.
 
-The surface area is the point: four duplicated `trainerOptions` queries plus
-joins in `attention.ts`, `moves.ts` and `stats.ts` all need the same predicate,
-so extract one helper rather than write it eight times. `BulkActionBar`'s
-trainer dropdown is a *write* target and must scope too. Notes and activity
-stay workspace-visible.
+Three findings worth keeping:
 
-With no auth this stays a convention, not a guarantee — switching users grants
-you their trainers, and the copy should say so.
+- **`stats.ts` never referenced trainers**, so the dex-wide dashboard needed no
+  scoping at all — the plan over-listed it.
+- **`db/schema.ts` cannot import `constants.ts`** — drizzle-kit loads it as CJS
+  and fails on the ESM path, the same trap already documented for
+  `drizzle.config.ts`. `DEFAULT_OWNER` is repeated as a literal there.
+- **The scope toggle had to be a query param, not a header** like
+  `X-Acting-User`. `useApi` keys off the path, so a header would have changed
+  nothing on screen until an unrelated refetch.
+
+Under "All trainers" you can open someone else's roster, so every write control
+is disabled with a banner naming the owner — showing buttons that can only 403
+is the dead-end this app keeps having to design out.
+
+With no auth this is a convention, not a guarantee: switching users grants you
+their trainers, and the switcher says so.
 
 ---
 
@@ -231,9 +242,12 @@ you their trainers, and the copy should say so.
   first suite: the aggregation endpoints (`/api/stats/dashboard`,
   `/api/trainers/:id`, `/api/attention`, `/api/moves/:id`) asserted against a
   known seeded fixture.
-- **No authentication.** The `users` table and "acting as" switcher (item 6
-  below) attribute writes but verify nothing — the acting user is a header the
-  client sets. Real auth means sessions and a check in `ownerFor`.
+- **No authentication.** The `users` table and "acting as" switcher attribute
+  writes but verify nothing — the acting user is a header the client sets. Real
+  auth means sessions and a check in `ownerFor`. **Item 7d now leans on this**:
+  trainer ownership scopes reads and 403s writes, which is real behaviour built
+  on an unverified claim. Auth is the one gap that turns a convention into a
+  guarantee.
 - **Single ~720 kB JS chunk.** Route-level `React.lazy` would split Recharts out
   of the pages that don't chart.
 - **No dark mode.** Tokens are centralised in `index.css` if it comes back.

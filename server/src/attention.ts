@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import { db } from './db/client.js';
 import { activity, moves, pokemon, roster, rosterMoves, trainers } from './db/schema.js';
 import { ATTENTION, type AttentionReasonCode, type RosterAlertCode } from './constants.js';
@@ -108,7 +108,7 @@ export function scoreFacts(facts: AttentionFacts): AttentionItem {
  * `roster` and `activity` both have a `pokemon_id`, so the unqualified form
  * would compare a table to itself (see CLAUDE.md § API conventions).
  */
-async function loadFacts(trainerId?: number): Promise<AttentionFacts[]> {
+async function loadFacts(trainerId?: number, scope?: SQL): Promise<AttentionFacts[]> {
   // `db.execute` constrains its generic to Record<string, unknown>, which an
   // interface can't satisfy without an index signature — cast the result
   // instead of weakening the type everything else consumes.
@@ -144,6 +144,7 @@ async function loadFacts(trainerId?: number): Promise<AttentionFacts[]> {
     join ${trainers} t on t.id = r.trainer_id
     where r.status <> 'retired'
       ${trainerId === undefined ? sql`` : sql`and r.trainer_id = ${trainerId}`}
+      ${scope ? sql`and ${scope}` : sql``}
   `);
 
   return rows.rows as unknown as AttentionFacts[];
@@ -156,8 +157,10 @@ async function loadFacts(trainerId?: number): Promise<AttentionFacts[]> {
 export async function getAttentionQueue(options: {
   trainerId?: number;
   limit?: number;
+  /** Owner predicate over `t` (the trainers alias). Omit for every roster. */
+  scope?: SQL;
 } = {}): Promise<{ items: AttentionItem[]; scanned: number }> {
-  const facts = await loadFacts(options.trainerId);
+  const facts = await loadFacts(options.trainerId, options.scope);
   const items = facts
     .map(scoreFacts)
     .filter((item) => item.reasons.length > 0)
@@ -193,7 +196,7 @@ export interface RosterAlert {
  *  - the active roster is short of a full party
  *  - a type hits several members for 2× and nothing on the team answers it
  */
-export async function getRosterAlerts(trainerId?: number): Promise<RosterAlert[]> {
+export async function getRosterAlerts(trainerId?: number, scope?: SQL): Promise<RosterAlert[]> {
   const rows = await db.execute(sql`
     select
       t.id                                            as "trainerId",
@@ -216,7 +219,9 @@ export async function getRosterAlerts(trainerId?: number): Promise<RosterAlert[]
     from ${trainers} t
     left join ${roster} r on r.trainer_id = t.id and r.status <> 'retired'
     left join ${pokemon} p on p.id = r.pokemon_id
-    ${trainerId === undefined ? sql`` : sql`where t.id = ${trainerId}`}
+    where true
+      ${trainerId === undefined ? sql`` : sql`and t.id = ${trainerId}`}
+      ${scope ? sql`and ${scope}` : sql``}
   `);
 
   // Group the flat join back into rosters. A trainer with an empty active
