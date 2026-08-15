@@ -388,6 +388,23 @@ export interface EvolutionRequirement {
   turnUpsideDown?: boolean;
 }
 
+/** Workspace health and attribution, from `GET /api/admin/overview`. */
+export interface AdminOverview {
+  counts: Record<string, number>;
+  /** Reference tables the seed owns, with what a complete import looks like. */
+  tables: {
+    key: string;
+    label: string;
+    expected: number | null;
+    seededBy: string;
+    actual: number;
+    status: 'ok' | 'partial' | 'empty';
+  }[];
+  /** Owner strings with no matching user row — see § users on the missing FK. */
+  orphans: { owner: string; trainers: number; notes: number; activity: number }[];
+  defaultOwner: string;
+}
+
 /** One equipped move on a roster entry. Slot is 1–4, mirroring the games. */
 export interface MovesetSlot {
   slot: number;

@@ -27,6 +27,7 @@ const PAGES: Command[] = [
   { id: 'page-notes', label: 'Notes', group: 'Pages', icon: '✎', to: '/notes' },
   { id: 'page-activity', label: 'Activity', group: 'Pages', icon: '⚡', to: '/activity' },
   { id: 'page-tableau', label: 'Tableau Dashboard', group: 'Pages', icon: '▦', to: '/tableau' },
+  { id: 'page-admin', label: 'Admin', group: 'Pages', icon: '⚙', to: '/admin' },
 ];
 
 const isPaletteHotkey = (event: KeyboardEvent) =>

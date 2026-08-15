@@ -63,7 +63,8 @@ pokemon-crm/
 │       │   ├── notes.ts      # cross-Pokémon feed + full CRUD
 │       │   ├── activity.ts   # status flag toggle + feed
 │       │   ├── stats.ts      # dashboard aggregations
-│       │   └── users.ts      # the "acting as" directory
+│       │   ├── users.ts      # the "acting as" directory
+│       │   └── admin.ts      # workspace health + owner reassignment
 │       └── scripts/
 │           ├── seed.ts       # one-time PokeAPI import (idempotent)
 │           ├── pokeapi.ts    # shared PokeAPI client: fetchJson, concurrency cap
@@ -112,6 +113,7 @@ pokemon-crm/
             ├── Moves.tsx     # move catalogue table
             ├── MoveProfile.tsx # one move: effect, learners, rosters
             ├── Team.tsx      # one trainer's roster: coverage, threats, readiness
+            ├── Admin.tsx     # ownership, users, orphans, data health (ungated)
             ├── Dashboard.tsx # dex-wide EDA charts (filterable)
             ├── Notes.tsx     # cross-Pokémon note feed
             ├── Activity.tsx  # cross-Pokémon status-flag table
@@ -133,6 +135,7 @@ pokemon-crm/
 | `/notes` | Notes — reads `?trainerId=` to scope to one roster |
 | `/activity` | Activity — reads `?trainerId=` to scope to one roster |
 | `/tableau` | Tableau Dashboard |
+| `/admin` | Admin — ownership, users, orphaned attribution, data health. **Ungated** |
 
 Anything unmatched redirects to `/`. **`/` is the landing page, not the
 lookup** — link to `/lookup` when you mean the table.
@@ -290,6 +293,28 @@ acting user fall back to `DEFAULT_OWNER` (`server/src/constants.ts`).
 - The client mirrors the rule rather than duplicating it: `isMine` on the
   trainer dashboard disables every write control and names the owner.
 
+### The admin page
+
+`/admin` (`pages/Admin.tsx`, `routes/admin.ts`) — ownership, users, orphaned
+attribution, and data health.
+
+- **Ungated, and says so on the page.** There is no auth and `users.role` is
+  display-only, so an "admins only" check would be a fiction over an unverified
+  header. It grants nothing new either: anyone could already inherit a trainer
+  by switching users.
+- **Reassignment ignores current ownership**, unlike every other trainer write.
+  A trainer whose owner no longer exists would otherwise be unrecoverable.
+- **Reassigning to an unknown email is refused** — that would manufacture the
+  orphan this page exists to clear.
+- **Moving `activity` de-duplicates first.** The table is unique on
+  `(pokemon, owner, kind)`, so a flag moving onto an owner who already has the
+  same one collides; the source row is dropped, since the destination already
+  records the fact.
+- **Notes and flags are opt-in** when reassigning: inheriting a caseload is not
+  the same as claiming authorship of someone's write-ups.
+- The trainer dropdown keeps an unknown owner as a visible `(unknown)` option
+  rather than silently displaying whoever sorts first.
+
 ### `trainers` and `roster`
 
 Advising analogy: trainer = advisor, roster = caseload, Pokémon = student.
@@ -357,6 +382,9 @@ All routes are under `/api`. Responses are JSON; errors are
 | GET | `/api/moves` | Move catalogue — `search`, `type`, `damageClass`, `generation`, `pokemonId`, `trainerId`, `learnMethod`, `minPower`, `maxPower`, `sort`, `direction`, pagination |
 | GET | `/api/moves/filters` | Distinct types/generations/damage classes/learn methods/ailments and the power range |
 | GET | `/api/moves/:id` | Move + paginated learners (`learnMethod`, pagination), learn-method and type breakdowns, and trainers with an active-roster learner |
+| GET | `/api/admin/overview` | Reference-table completeness, workspace counts, and owner strings with no matching user |
+| PATCH | `/api/admin/trainers/:id/owner` | Hand a trainer to another user. **Not** guarded by current ownership — an orphaned trainer must stay recoverable |
+| POST | `/api/admin/reassign-owner` | Move everything under one owner string to another — `includeTrainers` (default true), `includeNotes`, `includeActivity` |
 | GET | `/api/users` | The whole user directory with per-user note/flag counts, plus `defaultOwner`. Unpaginated: it backs the switcher |
 | POST | `/api/users` | Create a user |
 | PATCH | `/api/users/:id` | Update `name` / `role` / `initials`. **Not `email`** |

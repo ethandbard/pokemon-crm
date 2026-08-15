@@ -233,6 +233,27 @@ is the dead-end this app keeps having to design out.
 With no auth this is a convention, not a guarantee: switching users grants you
 their trainers, and the switcher says so.
 
+### ✅ 7e. Admin page — DONE
+
+`/admin` (`pages/Admin.tsx`, `routes/admin.ts`), covering the gap that trainer
+ownership could be *set* at creation but never *changed*.
+
+Four sections: data health (reference-table completeness, so a partial seed
+stops presenting as unexplained empty pages), trainer owner reassignment, user
+edit/delete — **both endpoints already existed with no UI**, so users could be
+created but never renamed or removed — and orphaned-attribution repair.
+
+Deliberately ungated; the page says so. Rules in CLAUDE.md § The admin page.
+
+Verified by deleting a user who owned two trainers: the orphan panel picked up
+2 trainers / 1 note / 3 flags, and reassigning moved 2 trainers, 1 note and
+**2** flags — the third was dropped as a duplicate, because the destination
+already carried that same `(pokemon, kind)` flag.
+
+Not built, and argued against: making the `ATTENTION` weights editable. They
+are documented compile-time constants; moving them to runtime needs a settings
+table and turns a legible model into mutable state.
+
 ---
 
 ## Known gaps (not yet scheduled)

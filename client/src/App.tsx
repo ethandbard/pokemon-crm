@@ -10,6 +10,7 @@ import { MovesPage } from './pages/Moves';
 import { MoveProfilePage } from './pages/MoveProfile';
 import { DashboardPage } from './pages/Dashboard';
 import { TeamPage } from './pages/Team';
+import { AdminPage } from './pages/Admin';
 import { NotesPage } from './pages/Notes';
 import { ActivityPage } from './pages/Activity';
 import { TrainersPage } from './pages/Trainers';
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="/notes" element={<NotesPage />} />
               <Route path="/trainers" element={<TrainersPage />} />
               <Route path="/team" element={<TeamPage />} />
+              <Route path="/admin" element={<AdminPage />} />
               <Route path="/activity" element={<ActivityPage />} />
               <Route path="/tableau" element={<TableauPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
