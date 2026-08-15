@@ -458,17 +458,35 @@ trainersRouter.get(
           order by count desc, t asc
         `),
 
+        /*
+         * Mean of each base stat across the ACTIVE roster.
+         *
+         * This was six `union all` arms each repeating the join and the where
+         * clause, and five of them had drifted from the sixth: none filtered
+         * out retired members, so the card averaged people who had left while
+         * its own subtitle said otherwise. Selecting the members once and
+         * unpivoting with a lateral VALUES makes the filter unrepeatable —
+         * there is now exactly one place it could be wrong.
+         */
         db.execute<{ stat: string; avg: number }>(sql`
-          select stat, round(avg(value))::int as avg
-          from (
-            select 'HP' as stat, p.hp as value from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-            union all select 'Attack', p.attack from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-            union all select 'Defense', p.defense from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-            union all select 'Sp. Atk', p.special_attack from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-            union all select 'Sp. Def', p.special_defense from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-            union all select 'Speed', p.speed from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-          ) s
-          group by stat
+          with members as (
+            select p.hp, p.attack, p.defense, p.special_attack, p.special_defense, p.speed
+            from ${roster} r
+            join ${pokemon} p on p.id = r.pokemon_id
+            where r.trainer_id = ${id} and r.status <> 'retired'
+          )
+          select s.stat, round(avg(s.value))::int as avg
+          from members m
+          cross join lateral (values
+            (1, 'HP',      m.hp),
+            (2, 'Attack',  m.attack),
+            (3, 'Defense', m.defense),
+            (4, 'Sp. Atk', m.special_attack),
+            (5, 'Sp. Def', m.special_defense),
+            (6, 'Speed',   m.speed)
+          ) as s(ord, stat, value)
+          group by s.ord, s.stat
+          order by s.ord
         `),
 
         // Note history for the roster — every note on any Pokémon this trainer carries.

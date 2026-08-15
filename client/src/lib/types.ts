@@ -385,8 +385,12 @@ export interface MovesetSlot {
  */
 export interface TrainerAnalysis {
   trainer: { id: number; name: string };
-  /** All 18 types, with the best multiplier the team's moves achieve. */
-  offense: { type: string; bestMultiplier: number; members: string[] }[];
+  /**
+   * All 18 types, with the best multiplier the team's moves achieve.
+   * `answeredBy` counts members with a *super-effective* answer, which is not
+   * `members.length` — that ties on the best result even when it is neutral.
+   */
+  offense: { type: string; bestMultiplier: number; members: string[]; answeredBy: number }[];
   /** All 18 types, with how many members each one hits hard. */
   defense: { type: string; weakCount: number; resistCount: number; weakMembers: string[] }[];
   /** Types nothing on the team hits for extra damage. */

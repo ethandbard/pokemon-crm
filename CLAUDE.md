@@ -102,6 +102,7 @@ pokemon-crm/
         │   ├── useCurrentUser.tsx # the acting user + labelFor()
         │   ├── types.ts      # hand-written API response shapes
         │   ├── page.ts       # PAGE_CONTAINER — the shared page content column
+        │   ├── charts.ts     # SERIES_*, axisProps, tooltipProps — chart chrome
         │   └── format.ts     # type colors, unit + date formatting
         └── pages/
             ├── Home.tsx      # landing page: counters + links to every page
@@ -110,7 +111,8 @@ pokemon-crm/
             ├── Profile.tsx   # detail + movepool + notes + activity log
             ├── Moves.tsx     # move catalogue table
             ├── MoveProfile.tsx # one move: effect, learners, rosters
-            ├── Dashboard.tsx # EDA charts (filterable)
+            ├── Team.tsx      # one trainer's roster: coverage, threats, readiness
+            ├── Dashboard.tsx # dex-wide EDA charts (filterable)
             ├── Notes.tsx     # cross-Pokémon note feed
             ├── Activity.tsx  # cross-Pokémon status-flag table
             └── Tableau.tsx   # embedded Tableau Public workbook
@@ -126,7 +128,8 @@ pokemon-crm/
 | `/pokemon/:id` | Pokémon Profile |
 | `/moves` | Move catalogue — reads `?pokemonId=` and `?trainerId=` to scope |
 | `/moves/:id` | Move detail — effect, learners, trainers who can field it |
-| `/dashboard` | Performance Dashboard |
+| `/team` | Team Dashboard — one trainer's roster analysed; `?trainerId=` selects |
+| `/dashboard` | Performance Dashboard (dex-wide) |
 | `/notes` | Notes — reads `?trainerId=` to scope to one roster |
 | `/activity` | Activity — reads `?trainerId=` to scope to one roster |
 | `/tableau` | Tableau Dashboard |
@@ -478,6 +481,10 @@ Two colour systems, kept apart:
 
 ### Charting
 
+**The chrome lives in `lib/charts.ts`** — `SERIES_1..4`, `axisProps`,
+`tooltipProps`, `BAR_RADIUS`. Import them; do not redeclare them per page. They
+were duplicated verbatim across two pages before a third arrived.
+
 - **Single-series charts** use `--color-series-1` and carry **no legend**; the
   card title names the measure. Multi-series charts always have a legend.
 - **Never a second y-axis.** Two measures on different scales become two charts.
@@ -551,6 +558,13 @@ Rules the analysis follows, all in `server/src/effectiveness.ts`:
   a type that hits 2+ members hard *and* is a gap — either alone is survivable.
 - The analysis endpoint scopes to the **active roster**, like every other
   trainer aggregate.
+- **`answeredBy` is not `members.length`.** The first counts members with a
+  super-effective answer; the second ties on the best result even when that
+  result is neutral. Charts asking "how many can answer this" want `answeredBy`.
+
+Two dashboards, deliberately distinct: **`/team`** analyses one trainer's roster,
+**`/dashboard`** explores the whole dex. A figure about one roster belongs on the
+former.
 
 ### Needs-attention scoring
 

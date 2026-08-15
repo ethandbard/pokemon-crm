@@ -32,33 +32,7 @@ import {
 import { PageHeader } from '../components/PageHeader';
 import { ACTIVITY_META, slugLabel, titleCase } from '../lib/format';
 import { PAGE_CONTAINER } from '../lib/page';
-
-/*
- * Charting conventions (see CLAUDE.md § Charting):
- *  - Single-series charts use --color-series-1 and carry no legend; the card
- *    title names the measure.
- *  - Multi-series charts get a legend, and never a second y-axis: two measures
- *    on different scales become two charts.
- *  - Grid and axes are recessive; marks are thin with rounded data-ends.
- */
-const SERIES_1 = 'var(--color-series-1)';
-const SERIES_2 = 'var(--color-series-2)';
-
-const axisProps = {
-  axisLine: false,
-  tickLine: false,
-  stroke: 'var(--color-muted)',
-} as const;
-
-const tooltipProps = {
-  cursor: { fill: 'var(--color-plane)' },
-  contentStyle: {
-    borderRadius: 8,
-    border: '1px solid var(--color-hairline)',
-    backgroundColor: 'var(--color-surface)',
-    fontSize: 12,
-  },
-} as const;
+import { SERIES_1, SERIES_2, axisProps, tooltipProps } from '../lib/charts';
 
 /** BST bands offered as a coarse "how strong" filter. */
 const BST_BANDS = [

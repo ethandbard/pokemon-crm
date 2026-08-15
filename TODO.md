@@ -1,8 +1,8 @@
 # TODO
 
 Items 1, 2, 3a, 3c, 4, 5 and 6 are done. **Item 7 — the roster-building pivot —
-is the live work**; phase 1 has landed. 3b's remaining bullets are parked behind
-it.
+is the live work**; phases 7a and 7b have landed, 7c is next. 3b's remaining
+bullets are parked behind it.
 
 ---
 
@@ -161,15 +161,28 @@ The constraint worth not reintroducing is recorded in CLAUDE.md § Roster
 analysis: **equipped is `roster_moves`, learnable is `pokemon_moves`**, and a
 team-strength figure that reads the latter is a ceiling wearing the wrong label.
 
-### 7b. Team-leader dashboard — next
+### ✅ 7b. Team-leader dashboard — DONE
 
-A new `/team` page (the dex-wide `/dashboard` stays as it is), trainer-scoped,
-reading the analysis endpoint. Two cleanups belong with it: `axisProps` /
-`tooltipProps` are copy-pasted between `Dashboard.tsx` and `Trainers.tsx`, and
-the trainer dashboard's `statAverages` fails to filter out retired members
-despite its own subtitle.
+`/team` (`pages/Team.tsx`), trainer-scoped via `?trainerId=`, reading the
+analysis endpoint: readiness tiles, open threats, attacking coverage and
+defensive exposure charts, coverage detail, and per-member moveset completeness.
+The dex-wide `/dashboard` is untouched.
 
-### 7c. Attention rework
+Both cleanups landed with it:
+
+- `axisProps` / `tooltipProps` extracted to `lib/charts.ts`, which is now the
+  one place chart chrome is defined.
+- `statAverages` on the trainer dashboard averaged **retired** members despite
+  its "Averaged across this roster" subtitle. It was six `union all` arms each
+  repeating the join and filter, and the filter was missing from all six;
+  rewritten as one scan plus a lateral `VALUES` unpivot, so there is now exactly
+  one place that filter could be wrong.
+
+`offense[].answeredBy` was added server-side rather than deriving it on the
+client — `members.length` ties on the best result even when neutral, so "how
+many can answer this" needed to mean one thing.
+
+### 7c. Attention rework — next
 
 Drop `behind_pace` (and `expPerDay`, the invented constant it rests on), plus
 `flagged` and `milestone_overdue`. Keep the review signals. Add

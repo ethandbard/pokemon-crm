@@ -21,6 +21,7 @@ const PAGES: Command[] = [
   { id: 'page-lookup', label: 'Pokémon Lookup', group: 'Pages', icon: '⌕', to: '/lookup' },
   { id: 'page-moves', label: 'Moves', group: 'Pages', icon: '⚔', to: '/moves' },
   { id: 'page-trainers', label: 'Trainers', group: 'Pages', icon: '☰', to: '/trainers' },
+  { id: 'page-team', label: 'Team Dashboard', group: 'Pages', icon: '◈', to: '/team' },
   { id: 'page-dashboard', label: 'Performance Dashboard', group: 'Pages', icon: '▤', to: '/dashboard' },
   { id: 'page-notes', label: 'Notes', group: 'Pages', icon: '✎', to: '/notes' },
   { id: 'page-activity', label: 'Activity', group: 'Pages', icon: '⚡', to: '/activity' },

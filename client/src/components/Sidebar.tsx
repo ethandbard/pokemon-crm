@@ -67,6 +67,18 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    // Sits next to Trainers: it answers a question about one roster, where the
+    // Performance Dashboard below explores the whole dex.
+    to: '/team',
+    label: 'Team Dashboard',
+    icon: icon(
+      <>
+        <path d="M12 3l7.5 4v5c0 4.2-3 7.6-7.5 9-4.5-1.4-7.5-4.8-7.5-9V7z" />
+        <path d="m9 12 2 2 4-4" />
+      </>,
+    ),
+  },
+  {
     to: '/dashboard',
     label: 'Performance Dashboard',
     icon: icon(

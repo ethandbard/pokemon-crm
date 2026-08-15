@@ -45,6 +45,7 @@ import {
   titleCase,
 } from '../lib/format';
 import { PAGE_CONTAINER } from '../lib/page';
+import { axisProps, tooltipProps } from '../lib/charts';
 
 export function TrainersPage() {
   // The selected trainer lives in the URL so a dashboard can be linked to
@@ -211,22 +212,6 @@ export function TrainersPage() {
     </div>
   );
 }
-
-const axisProps = {
-  axisLine: false,
-  tickLine: false,
-  stroke: 'var(--color-muted)',
-} as const;
-
-const tooltipProps = {
-  cursor: { fill: 'var(--color-plane)' },
-  contentStyle: {
-    borderRadius: 8,
-    border: '1px solid var(--color-hairline)',
-    backgroundColor: 'var(--color-surface)',
-    fontSize: 12,
-  },
-} as const;
 
 /**
  * Team analysis from **equipped** movesets — the card that answers "does this

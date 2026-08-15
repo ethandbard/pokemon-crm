@@ -154,6 +154,14 @@ export interface OffensiveCoverage {
   bestMultiplier: number;
   /** Members whose moveset contains that best answer. */
   members: string[];
+  /**
+   * Members with a **super-effective** answer.
+   *
+   * Distinct from `members.length`, which counts whoever ties the best result
+   * even when that result is neutral. Returned rather than left to the client
+   * so "how many can answer this" means one thing everywhere.
+   */
+  answeredBy: number;
 }
 
 export interface DefensiveExposure {
@@ -181,6 +189,7 @@ export interface DefensiveExposure {
 export function offensiveCoverage(chart: TypeChart, members: RosterMember[]): OffensiveCoverage[] {
   return POKEMON_TYPES.map((defending) => {
     let bestMultiplier = 0;
+    let answeredBy = 0;
     const providers: string[] = [];
 
     for (const member of members) {
@@ -191,6 +200,8 @@ export function offensiveCoverage(chart: TypeChart, members: RosterMember[]): Of
         if (multiplier > memberBest) memberBest = multiplier;
       }
 
+      if (memberBest > 100) answeredBy += 1;
+
       if (memberBest > bestMultiplier) {
         bestMultiplier = memberBest;
         providers.length = 0;
@@ -200,7 +211,7 @@ export function offensiveCoverage(chart: TypeChart, members: RosterMember[]): Of
       }
     }
 
-    return { type: defending, bestMultiplier, members: providers };
+    return { type: defending, bestMultiplier, members: providers, answeredBy };
   });
 }
 
