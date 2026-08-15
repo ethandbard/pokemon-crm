@@ -630,6 +630,7 @@ function TrainerDashboard({
                   refetch();
                   onTrainerChanged();
                 }}
+                onEditMoveset={setEditingMoveset}
               />
             ) : (
             <div className="overflow-x-auto">
@@ -768,11 +769,23 @@ function TrainerDashboard({
                           </div>
                         </td>
                         <td className="px-2 py-2 text-right whitespace-nowrap">
+                          {/* Named alongside Edit and Remove rather than left
+                              to the Moveset number, which reads as a status
+                              and only looks clickable on hover. */}
+                          <button
+                            type="button"
+                            onClick={() => setEditingMoveset(member)}
+                            disabled={busy}
+                            aria-label={`Edit moveset for ${member.nickname ?? member.displayName}`}
+                            className="text-xs text-muted hover:text-brand disabled:opacity-50"
+                          >
+                            Moves
+                          </button>
                           <button
                             type="button"
                             onClick={() => setEditingMember(member)}
                             disabled={busy}
-                            className="text-xs text-muted hover:text-brand disabled:opacity-50"
+                            className="ml-3 text-xs text-muted hover:text-brand disabled:opacity-50"
                           >
                             Edit
                           </button>
