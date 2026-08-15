@@ -451,6 +451,12 @@ All routes are under `/api`. Responses are JSON; errors are
   record centre, the CRM record (notes, activity log) right. At `lg` there is room
   for two, so the CRM rail takes `lg:col-span-2 xl:col-span-1` and runs full width
   underneath instead of crushing the centre column.
+- **A surface that reports a problem offers the fix in place.** The attention
+  queue's only affordance used to be the Pokémon's name, which leads to its
+  profile — a page with no roster attachment and therefore no way to edit the
+  moveset the queue was asking for. Each row now carries named actions (Set
+  moves, Mark reviewed, Flag, and links to the profile and roster), and the
+  moveset editor opens over the queue so it re-ranks without navigating away.
 - **Response types are hand-written** in `lib/types.ts`. If you change a route's
   response shape, update the matching interface.
 - **`Paginator` takes the API's `pagination` object whole**, not spread fields,

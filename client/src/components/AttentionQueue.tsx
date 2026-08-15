@@ -1,15 +1,18 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { toQueryString } from '../lib/api';
+import { api, toQueryString } from '../lib/api';
 import { useApi } from '../lib/useApi';
 import type {
   AttentionItem,
   AttentionReasonCode,
   AttentionResponse,
+  RosterAlert,
   RosterAlertCode,
 } from '../lib/types';
 import { Card, EmptyState, ErrorState, Loading } from './ui';
 import { dexNumber } from '../lib/format';
+import { MovesetEditor } from './MovesetEditor';
+import { useToast } from './Toast';
 
 /**
  * Reason presentation. Colour is *not* the only channel — each reason ships an
@@ -68,8 +71,23 @@ export function AttentionQueue({
   );
   const { data, loading, error, refetch } = useApi<AttentionResponse>(path);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [editingMoveset, setEditingMoveset] = useState<AttentionItem | null>(null);
 
   const maxScore = data?.data[0]?.score ?? 0;
+
+  // One block per trainer: the workspace view otherwise repeats "Brock
+  // Harrison:" down seven consecutive rows.
+  const alertGroups = useMemo(() => {
+    const groups = new Map<number, { trainerId: number; trainerName: string; alerts: RosterAlert[] }>();
+    for (const alert of data?.alerts ?? []) {
+      const group =
+        groups.get(alert.trainerId) ??
+        { trainerId: alert.trainerId, trainerName: alert.trainerName, alerts: [] };
+      group.alerts.push(alert);
+      groups.set(alert.trainerId, group);
+    }
+    return [...groups.values()];
+  }, [data?.alerts]);
 
   return (
     <Card
@@ -98,33 +116,75 @@ export function AttentionQueue({
             answer to Ground" is not any one member's fault, and fixing it may
             mean adding a Pokémon rather than editing one.
           */}
-          {data.alerts.length > 0 && (
-            <ul className="mb-2 space-y-1.5">
-              {data.alerts.map((alert) => (
-                <li
-                  key={`${alert.trainerId}-${alert.code}-${alert.label}`}
-                  className="flex items-start gap-2 rounded-md border border-hairline bg-plane/60 px-2.5 py-1.5 text-xs"
+          {alertGroups.length > 0 && (
+            <div className="mb-4 space-y-2">
+              {alertGroups.map((group) => (
+                <div
+                  key={group.trainerId}
+                  className="rounded-lg border border-hairline bg-plane/50 p-2.5"
                 >
-                  <span aria-hidden="true" className={`mt-0.5 ${ALERT_META[alert.code].tone}`}>
-                    {ALERT_META[alert.code].icon}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="font-medium text-ink">
-                      {showTrainer && `${alert.trainerName}: `}
-                      {alert.label}
+                  {/*
+                    The trainer is named once per group rather than repeated on
+                    every row, and it is the entry point: these problems are
+                    fixed on the roster, not on any Pokémon's profile.
+                  */}
+                  <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                    {showTrainer ? (
+                      <Link
+                        to={`/trainers${toQueryString({ trainerId: group.trainerId })}`}
+                        className="text-sm font-semibold text-ink hover:text-brand"
+                      >
+                        {group.trainerName}
+                      </Link>
+                    ) : (
+                      <span className="text-xs font-medium uppercase tracking-wide text-muted">
+                        Roster alerts
+                      </span>
+                    )}
+                    <span className="flex gap-3 text-xs">
+                      <Link
+                        to={`/team${toQueryString({ trainerId: group.trainerId })}`}
+                        className="font-medium text-brand hover:underline"
+                      >
+                        Team analysis →
+                      </Link>
+                      {showTrainer && (
+                        <Link
+                          to={`/trainers${toQueryString({ trainerId: group.trainerId })}`}
+                          className="font-medium text-brand hover:underline"
+                        >
+                          Roster →
+                        </Link>
+                      )}
                     </span>
-                    <span className="block text-muted">{alert.detail}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+                  </div>
 
-          {data.alertsTotal > data.alerts.length && (
-            <p className="mb-4 text-xs text-muted">
-              Showing {data.alerts.length} of {data.alertsTotal} roster alerts — open a trainer to
-              see all of theirs.
-            </p>
+                  <ul className="space-y-1">
+                    {group.alerts.map((alert) => (
+                      <li
+                        key={`${alert.code}-${alert.label}`}
+                        className="flex items-start gap-2 text-xs"
+                      >
+                        <span aria-hidden="true" className={`mt-0.5 ${ALERT_META[alert.code].tone}`}>
+                          {ALERT_META[alert.code].icon}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="text-ink">{alert.label}</span>
+                          <span className="block text-muted">{alert.detail}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+
+              {data.alertsTotal > data.alerts.length && (
+                <p className="text-xs text-muted">
+                  Showing {data.alerts.length} of {data.alertsTotal} roster alerts — open a trainer
+                  to see all of theirs.
+                </p>
+              )}
+            </div>
           )}
 
           {data.data.length === 0 ? (
@@ -147,6 +207,8 @@ export function AttentionQueue({
                   showTrainer={showTrainer}
                   open={expanded === item.rosterId}
                   onToggle={() => setExpanded(expanded === item.rosterId ? null : item.rosterId)}
+                  onSetMoves={() => setEditingMoveset(item)}
+                  onChanged={refetch}
                 />
               ))}
             </ol>
@@ -164,6 +226,22 @@ export function AttentionQueue({
           </p>
         </>
       )}
+
+      {/* Editing happens here rather than by navigating away, so the queue is
+          still on screen — and re-ranks — once the moveset is saved. */}
+      {editingMoveset && (
+        <MovesetEditor
+          open
+          rosterId={editingMoveset.rosterId}
+          pokemonId={editingMoveset.pokemonId}
+          memberName={editingMoveset.nickname ?? editingMoveset.displayName}
+          onClose={() => setEditingMoveset(null)}
+          onSaved={() => {
+            setEditingMoveset(null);
+            refetch();
+          }}
+        />
+      )}
     </Card>
   );
 }
@@ -175,6 +253,8 @@ function AttentionRow({
   showTrainer,
   open,
   onToggle,
+  onSetMoves,
+  onChanged,
 }: {
   item: AttentionItem;
   rank: number;
@@ -182,8 +262,51 @@ function AttentionRow({
   showTrainer: boolean;
   open: boolean;
   onToggle: () => void;
+  onSetMoves: () => void;
+  onChanged: () => void;
 }) {
+  const { toast } = useToast();
+  const [busy, setBusy] = useState(false);
   const name = item.nickname ?? item.displayName;
+
+  const needsMoves = item.reasons.some(
+    (reason) => reason.code === 'moveset_missing' || reason.code === 'moveset_incomplete',
+  );
+
+  /**
+   * Re-posting `reviewed` bumps its timestamp rather than clearing the flag
+   * (see CLAUDE.md § activity), so this clears both review signals in one
+   * click and the row drops out of the queue on refetch.
+   */
+  async function markReviewed() {
+    setBusy(true);
+    try {
+      await api.post('/api/activity/toggle', { pokemonId: item.pokemonId, kind: 'reviewed' });
+      toast(`Marked ${name} reviewed`, { tone: 'success' });
+      onChanged();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not mark reviewed', { tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function flag() {
+    setBusy(true);
+    try {
+      await api.post('/api/activity/toggle', { pokemonId: item.pokemonId, kind: 'flagged' });
+      // Deliberately says what it does NOT do: flags no longer feed the queue,
+      // so a user would otherwise expect this row to change and it will not.
+      toast(`Flagged ${name} — visible on Activity; does not affect this ranking`, {
+        tone: 'success',
+      });
+      onChanged();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not flag', { tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <li className="rounded-lg border border-hairline">
@@ -238,6 +361,21 @@ function AttentionRow({
           </span>
         </span>
 
+        {/*
+          The fix for the row's biggest signal, inline. Clicking the Pokémon
+          goes to its profile, which is not attached to a roster and cannot
+          edit a moveset — so the action the queue is asking for has to be
+          here, not one navigation away from where it isn't.
+        */}
+        <button
+          type="button"
+          onClick={needsMoves ? onSetMoves : markReviewed}
+          disabled={busy}
+          className="shrink-0 rounded-md border border-hairline px-2 py-1 text-xs font-medium text-ink hover:border-brand hover:text-brand disabled:opacity-50"
+        >
+          {needsMoves ? 'Set moves' : 'Mark reviewed'}
+        </button>
+
         <button
           type="button"
           onClick={onToggle}
@@ -249,18 +387,51 @@ function AttentionRow({
       </div>
 
       {open && (
-        <ul className="space-y-1 border-t border-hairline bg-plane/60 px-3 py-2.5">
-          {item.reasons.map((reason) => (
-            <li key={reason.code} className="flex items-start gap-2 text-xs">
-              <span aria-hidden="true" className="mt-0.5 text-muted">
-                {REASON_META[reason.code].icon}
-              </span>
-              <span className="flex-1 text-ink-2">{reason.label}</span>
-              <span className="tabular-nums text-muted">+{reason.points}</span>
-            </li>
-          ))}
-        </ul>
+        <div className="border-t border-hairline bg-plane/60 px-3 py-2.5">
+          <ul className="space-y-1">
+            {item.reasons.map((reason) => (
+              <li key={reason.code} className="flex items-start gap-2 text-xs">
+                <span aria-hidden="true" className="mt-0.5 text-muted">
+                  {REASON_META[reason.code].icon}
+                </span>
+                <span className="flex-1 text-ink-2">{reason.label}</span>
+                <span className="tabular-nums text-muted">+{reason.points}</span>
+              </li>
+            ))}
+          </ul>
+
+          {/* Every action this row supports, named. */}
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-hairline pt-2.5">
+            <button
+              type="button"
+              onClick={onSetMoves}
+              disabled={busy}
+              className={actionClass}
+            >
+              Set moves ({item.movesetSize}/4)
+            </button>
+            <button type="button" onClick={markReviewed} disabled={busy} className={actionClass}>
+              Mark reviewed
+            </button>
+            <button type="button" onClick={flag} disabled={busy} className={actionClass}>
+              Flag
+            </button>
+            <Link to={`/pokemon/${item.pokemonId}`} className={actionClass}>
+              Pokémon page
+            </Link>
+            <Link
+              to={`/trainers${toQueryString({ trainerId: item.trainerId })}`}
+              className={actionClass}
+            >
+              {showTrainer ? `${item.trainerName}'s roster` : 'Roster'}
+            </Link>
+          </div>
+        </div>
       )}
     </li>
   );
 }
+
+/** Shared look for the row's action cluster — buttons and links must match. */
+const actionClass =
+  'rounded-md border border-hairline bg-surface px-2 py-1 text-xs text-ink-2 hover:border-brand hover:text-brand disabled:opacity-50';
