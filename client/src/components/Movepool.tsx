@@ -1,9 +1,66 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { MoveSummary, MovepoolEntry } from '../lib/types';
-import { Card, DamageClassBadge, EmptyState, TypeBadge } from './ui';
+import { Card, DamageClassBadge, EmptyState, Select, TextInput, TypeBadge } from './ui';
 import { LEARN_METHOD_ORDER, learnMethodLabel, movePower, moveStat, slugLabel, titleCase } from '../lib/format';
 import { toQueryString } from '../lib/api';
+
+type SortKey = 'level' | 'name' | 'type' | 'class' | 'power' | 'accuracy' | 'pp';
+type SortDirection = 'asc' | 'desc';
+interface Sort {
+  key: SortKey;
+  direction: SortDirection;
+}
+
+/** Measures read high-to-low first; labels and level read low-to-high. */
+const DESC_FIRST: SortKey[] = ['power', 'accuracy', 'pp'];
+
+/**
+ * The value a column sorts on, which is not always the value it stores.
+ *
+ * Power is the exception: PokeAPI reports **0** as well as null for "no fixed
+ * base power", `movePower` renders both as "—", and so both sort as absent.
+ * Sorting 0 as a number would file every status move below Splash's 40 while
+ * the column shows them all as the same dash.
+ */
+function sortValue(move: MovepoolEntry, key: SortKey): string | number | null {
+  switch (key) {
+    case 'level':
+      return move.levelLearnedAt;
+    case 'name':
+      return move.displayName.toLowerCase();
+    case 'type':
+      return move.type;
+    case 'class':
+      return move.damageClass;
+    case 'power':
+      return move.power === 0 ? null : move.power;
+    case 'accuracy':
+      return move.accuracy;
+    case 'pp':
+      return move.pp;
+  }
+}
+
+function compareBy(a: MovepoolEntry, b: MovepoolEntry, { key, direction }: Sort): number {
+  const left = sortValue(a, key);
+  const right = sortValue(b, key);
+
+  // Absent values sink in BOTH directions. Flipping them to the top on a
+  // descending sort would bury the strongest move under a wall of dashes,
+  // which is the opposite of what clicking "Pow" asks for.
+  if (left === null || right === null) {
+    if (left === right) return 0;
+    return left === null ? 1 : -1;
+  }
+
+  const cmp =
+    typeof left === 'string'
+      ? left.localeCompare(right as string)
+      : (left as number) - (right as number);
+
+  return direction === 'asc' ? cmp : -cmp;
+}
 
 /**
  * A species' movepool, grouped by how each move is learned.
@@ -41,7 +98,66 @@ export function Movepool({
 
   const [method, setMethod] = useState<string | null>(null);
   const active = method && byMethod.groups.has(method) ? method : (byMethod.methods[0] ?? null);
-  const rows = active ? (byMethod.groups.get(active) ?? []) : [];
+  const tabRows = active ? (byMethod.groups.get(active) ?? []) : [];
+
+  const [query, setQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [classFilter, setClassFilter] = useState('');
+  // null = "whatever this tab sorts by naturally"; set once the user clicks a
+  // header, so switching tabs doesn't silently keep a sort they never chose.
+  const [sort, setSort] = useState<Sort | null>(null);
+
+  // Dropdown options come from the active tab, not the whole movepool, so every
+  // option offered returns at least one row.
+  const { types, classes } = useMemo(
+    () => ({
+      types: [...new Set(tabRows.map((move) => move.type))].sort(),
+      classes: [...new Set(tabRows.map((move) => move.damageClass))].sort(),
+    }),
+    [tabRows],
+  );
+
+  // "Lv" only exists on the level-up tab, so a level sort can't survive a move
+  // to another tab; fall back rather than sorting by a column that isn't there.
+  const defaultSort: Sort =
+    active === 'level-up' ? { key: 'level', direction: 'asc' } : { key: 'name', direction: 'asc' };
+  const activeSort: Sort =
+    sort && (sort.key !== 'level' || active === 'level-up') ? sort : defaultSort;
+
+  const rows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return tabRows
+      .filter(
+        (move) =>
+          (!needle || move.displayName.toLowerCase().includes(needle)) &&
+          (!typeFilter || move.type === typeFilter) &&
+          (!classFilter || move.damageClass === classFilter),
+      )
+      .sort(
+        (a, b) =>
+          compareBy(a, b, activeSort) ||
+          // Tiebreakers keep the order stable when a column has ties, so rows
+          // don't shuffle between renders.
+          a.displayName.localeCompare(b.displayName) ||
+          a.moveId - b.moveId,
+      );
+  }, [tabRows, query, typeFilter, classFilter, activeSort.key, activeSort.direction]);
+
+  const hasFilters = Boolean(query || typeFilter || classFilter);
+
+  function toggleSort(key: SortKey) {
+    setSort((current) =>
+      current?.key === key
+        ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: DESC_FIRST.includes(key) ? 'desc' : 'asc' },
+    );
+  }
+
+  function clearFilters() {
+    setQuery('');
+    setTypeFilter('');
+    setClassFilter('');
+  }
 
   if (moves.length === 0) {
     return (
@@ -129,33 +245,78 @@ export function Movepool({
         ))}
       </div>
 
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <TextInput
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter moves…"
+          aria-label="Filter moves by name"
+          className="w-44"
+        />
+        <Select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          aria-label="Filter moves by type"
+        >
+          <option value="">All types</option>
+          {types.map((type) => (
+            <option key={type} value={type}>
+              {titleCase(type)}
+            </option>
+          ))}
+        </Select>
+        <Select
+          value={classFilter}
+          onChange={(e) => setClassFilter(e.target.value)}
+          aria-label="Filter moves by damage class"
+        >
+          <option value="">All classes</option>
+          {classes.map((damageClass) => (
+            <option key={damageClass} value={damageClass}>
+              {titleCase(damageClass)}
+            </option>
+          ))}
+        </Select>
+
+        {hasFilters && (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="text-xs font-medium text-brand hover:underline"
+          >
+            Clear
+          </button>
+        )}
+
+        <span className="ml-auto text-xs tabular-nums text-muted">
+          {hasFilters
+            ? `${rows.length} of ${tabRows.length}`
+            : `${tabRows.length} ${tabRows.length === 1 ? 'move' : 'moves'}`}
+        </span>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="rounded-lg border border-hairline">
+          <EmptyState
+            title="No moves match those filters"
+            description={`Nothing in ${learnMethodLabel(active ?? '')} matches. Try another type or class, or clear the filters.`}
+          />
+        </div>
+      ) : (
       <div className="max-h-96 overflow-y-auto rounded-lg border border-hairline">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-surface">
             <tr className="border-b border-hairline text-xs text-muted">
               {active === 'level-up' && (
-                <th scope="col" className="px-3 py-2 text-right font-medium">
-                  Lv
-                </th>
+                <SortableTh label="Lv" sortKey="level" sort={activeSort} onSort={toggleSort} align="right" />
               )}
-              <th scope="col" className="px-3 py-2 text-left font-medium">
-                Move
-              </th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
-                Type
-              </th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
-                Class
-              </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
-                Pow
-              </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
-                Acc
-              </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
-                PP
-              </th>
+              <SortableTh label="Move" sortKey="name" sort={activeSort} onSort={toggleSort} />
+              <SortableTh label="Type" sortKey="type" sort={activeSort} onSort={toggleSort} />
+              <SortableTh label="Class" sortKey="class" sort={activeSort} onSort={toggleSort} />
+              <SortableTh label="Pow" sortKey="power" sort={activeSort} onSort={toggleSort} align="right" />
+              <SortableTh label="Acc" sortKey="accuracy" sort={activeSort} onSort={toggleSort} align="right" />
+              <SortableTh label="PP" sortKey="pp" sort={activeSort} onSort={toggleSort} align="right" />
             </tr>
           </thead>
           <tbody>
@@ -202,6 +363,7 @@ export function Movepool({
           </tbody>
         </table>
       </div>
+      )}
 
       {/* The version group is stated because a movepool is per-game data and
           this row set is one game's answer, not a timeless fact. */}
@@ -213,6 +375,51 @@ export function Movepool({
         </p>
       )}
     </Card>
+  );
+}
+
+/**
+ * A movepool column header that sorts. The arrow sits in a fixed-width slot so
+ * the header row doesn't jitter as the active column changes.
+ */
+function SortableTh({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  align = 'left',
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: Sort;
+  onSort: (key: SortKey) => void;
+  align?: 'left' | 'right';
+}) {
+  const isActive = sort.key === sortKey;
+
+  // The padding lives on the button, not the cell, so the whole header is the
+  // hit target rather than just the few pixels the label covers.
+  return (
+    <th
+      scope="col"
+      aria-sort={isActive ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className="p-0 font-medium"
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={[
+          'flex w-full items-center gap-1 px-3 py-2 hover:text-ink',
+          align === 'right' ? 'flex-row-reverse' : '',
+          isActive ? 'text-ink' : '',
+        ].join(' ')}
+      >
+        {label}
+        <span aria-hidden="true" className="w-2 text-[9px] text-brand-strong">
+          {isActive ? (sort.direction === 'asc' ? '▲' : '▼') : ''}
+        </span>
+      </button>
+    </th>
   );
 }
 

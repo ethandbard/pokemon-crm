@@ -31,6 +31,7 @@ import {
 } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
 import { ACTIVITY_META, slugLabel, titleCase } from '../lib/format';
+import { PAGE_CONTAINER } from '../lib/page';
 
 /*
  * Charting conventions (see CLAUDE.md § Charting):
@@ -269,7 +270,7 @@ export function DashboardPage() {
 
   if (loading && !data) {
     return (
-      <div className="mx-auto max-w-[1400px] px-8 py-7">
+      <div className={PAGE_CONTAINER}>
         <Loading label="Crunching the dataset…" />
       </div>
     );
@@ -277,7 +278,7 @@ export function DashboardPage() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-[1400px] px-8 py-7">
+      <div className={PAGE_CONTAINER}>
         <ErrorState message={error} onRetry={refetch} />
       </div>
     );
@@ -285,7 +286,7 @@ export function DashboardPage() {
 
   if (!data?.summary || data.summary.total === 0) {
     return (
-      <div className="mx-auto max-w-[1400px] px-8 py-7">
+      <div className={PAGE_CONTAINER}>
         <PageHeader title="Performance Dashboard" />
         {filterBar}
         <div className="rounded-xl border border-hairline bg-surface">
@@ -311,7 +312,7 @@ export function DashboardPage() {
   const { summary, crm } = data;
 
   return (
-    <div className="mx-auto max-w-[1400px] px-8 py-7">
+    <div className={PAGE_CONTAINER}>
       <PageHeader
         title="Performance Dashboard"
         description={

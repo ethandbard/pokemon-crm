@@ -37,6 +37,7 @@ import {
   formatDate,
   titleCase,
 } from '../lib/format';
+import { PAGE_CONTAINER } from '../lib/page';
 
 export function TrainersPage() {
   // The selected trainer lives in the URL so a dashboard can be linked to
@@ -59,7 +60,7 @@ export function TrainersPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1300px] px-8 py-7">
+    <div className={PAGE_CONTAINER}>
       <PageHeader
         title="Trainers"
         description="Each trainer carries a roster of Pokémon — the advising analogue of an advisor's caseload. Pick a trainer to open their dashboard."
@@ -157,7 +158,7 @@ export function TrainersPage() {
               key={trainer.id}
               type="button"
               onClick={() => selectTrainer(String(trainer.id))}
-              className="rounded-xl border border-hairline bg-surface p-5 text-left transition-colors hover:border-brand focus:outline-none focus:ring-2 focus:ring-brand"
+              className="flex h-full flex-col rounded-xl border border-hairline bg-surface p-5 text-left transition-colors hover:border-brand focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -172,7 +173,11 @@ export function TrainersPage() {
 
               {trainer.bio && <p className="mt-3 text-xs text-ink-2">{trainer.bio}</p>}
 
-              <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-hairline pt-3 text-center">
+              {/* `mt-auto` pins the stats to the card's foot. Grid rows stretch
+                  cards to a common height, so without it the figures sit
+                  wherever each bio happens to end and never line up across a
+                  row — trainers with no bio float theirs a line higher. */}
+              <dl className="mt-auto grid grid-cols-3 gap-2 border-t border-hairline pt-3 text-center">
                 <div>
                   <dt className="text-[11px] text-muted">Roster</dt>
                   <dd className="text-sm font-semibold tabular-nums text-ink">

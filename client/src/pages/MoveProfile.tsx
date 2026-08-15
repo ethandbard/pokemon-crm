@@ -25,6 +25,7 @@ import {
 } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
 import { dexNumber, learnMethodLabel, movePower, moveStat, slugLabel, titleCase } from '../lib/format';
+import { PAGE_CONTAINER } from '../lib/page';
 
 const axisProps = {
   axisLine: false,
@@ -44,7 +45,7 @@ export function MoveProfilePage() {
 
   if (loading && !data) {
     return (
-      <div className="mx-auto max-w-[1200px] px-8 py-7">
+      <div className={PAGE_CONTAINER}>
         <Loading label="Loading move…" />
       </div>
     );
@@ -52,7 +53,7 @@ export function MoveProfilePage() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-[1200px] px-8 py-7">
+      <div className={PAGE_CONTAINER}>
         <ErrorState message={error} onRetry={refetch} />
       </div>
     );
@@ -64,7 +65,7 @@ export function MoveProfilePage() {
   const typeData = typeBreakdown.slice(0, 10).map((row) => ({ ...row, type: titleCase(row.type) }));
 
   return (
-    <div className="mx-auto max-w-[1200px] px-8 py-7">
+    <div className={PAGE_CONTAINER}>
       <PageHeader
         title={move.displayName}
         description={`${titleCase(move.type)} · ${titleCase(move.damageClass)}${

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Card, ErrorState, Loading } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
+import { PAGE_CONTAINER } from '../lib/page';
 
 /**
  * The Tableau Public viz to embed. The share snippet expresses this as a
@@ -109,7 +110,7 @@ export function TableauPage() {
   }, [attempt]);
 
   return (
-    <div className="mx-auto max-w-[1400px] px-8 py-7">
+    <div className={PAGE_CONTAINER}>
       <PageHeader
         title="Tableau Dashboard"
         description="A published Tableau Public workbook, embedded alongside the in-app analytics."

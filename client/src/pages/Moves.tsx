@@ -17,6 +17,7 @@ import {
 import { PageHeader } from '../components/PageHeader';
 import { SavedViews } from '../components/SavedViews';
 import { learnMethodLabel, movePower, moveStat, slugLabel, titleCase } from '../lib/format';
+import { PAGE_CONTAINER } from '../lib/page';
 
 const COLUMNS = [
   { key: 'name', label: 'Move', numeric: false },
@@ -120,7 +121,7 @@ export function MovesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] px-8 py-7">
+    <div className={PAGE_CONTAINER}>
       <PageHeader
         title="Moves"
         description="Every move in the dataset — the course catalogue behind each Pokémon's movepool. Select a move to see who learns it and how."

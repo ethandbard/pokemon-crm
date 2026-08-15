@@ -82,7 +82,7 @@ pokemon-crm/
         │   ├── TrainerForm.tsx        # create/edit a trainer
         │   ├── RosterEditor.tsx       # add / edit / transfer roster entries
         │   ├── EvolutionProgress.tsx  # stage bar + full chain view
-        │   ├── Movepool.tsx   # movepool grouped by learn method + coverage
+        │   ├── Movepool.tsx   # movepool by learn method, sortable + filterable
         │   ├── AttentionQueue.tsx     # ranked early-alert list with reasons
         │   ├── CommandPalette.tsx     # ⌘K global jump-to
         │   ├── Toast.tsx     # ToastProvider, useToast, confirmable(), useHotkey
@@ -97,6 +97,7 @@ pokemon-crm/
         │   ├── useSavedViews.ts # localStorage-backed filter presets
         │   ├── useCurrentUser.tsx # the acting user + labelFor()
         │   ├── types.ts      # hand-written API response shapes
+        │   ├── page.ts       # PAGE_CONTAINER — the shared page content column
         │   └── format.ts     # type colors, unit + date formatting
         └── pages/
             ├── Home.tsx      # landing page: counters + links to every page
@@ -299,7 +300,7 @@ All routes are under `/api`. Responses are JSON; errors are
 | POST | `/api/trainers/:id/roster` | Add a Pokémon to that trainer's roster |
 | PATCH | `/api/roster/:id` | Update nickname/level/status, or move the entry to another trainer |
 | DELETE | `/api/roster/:id` | Remove a roster entry |
-| GET | `/api/notes` | Cross-Pokémon feed — `search`, `pokemonId`, `owner`, `trainerId`, `sort`, `direction`, pagination. Also returns `owners` and `trainers` for the filter dropdowns |
+| GET | `/api/notes` | Cross-Pokémon feed — `search` (note body **or** Pokémon name), `pokemonId`, `owner`, `trainerId`, `sort`, `direction`, pagination. Also returns `owners` and `trainers` for the filter dropdowns |
 | POST | `/api/notes` | Create |
 | PATCH | `/api/notes/:id` | Update body |
 | DELETE | `/api/notes/:id` | Delete |
@@ -379,6 +380,31 @@ All routes are under `/api`. Responses are JSON; errors are
   loaded. Use `Loading`, `ErrorState`, `EmptyState` from `components/ui.tsx`.
 - **API paths are relative** (`/api/...`); Vite proxies them to `localhost:4000`
   in dev.
+- **Every page's outermost element uses `PAGE_CONTAINER`** (`lib/page.ts`), never
+  its own `max-w-*`. One width for all routes keeps the content box from shifting
+  sideways on navigation and keeps identical toolbars wrapping at the same point.
+- **Cards in a grid put their footer row on `mt-auto`** inside a `flex h-full
+  flex-col` card. Grid rows stretch cards to a common height, so a footer that
+  merely follows variable-length copy lands at a different y in each card.
+- **List surfaces sort from their column headers, not a sort dropdown.** The
+  header drives the API's `sort`/`direction`; clicking the active column flips
+  direction, and a new column starts descending for timestamps, ascending for
+  names.
+- **A surface whose search spans more than one field highlights the match.**
+  Notes searches note text and Pokémon name together, so without the mark it is
+  not clear which column a row matched on. Escape the term before it becomes a
+  pattern, and highlight the *debounced* term so the marks agree with the rows.
+- **Client-side column sorts sink absent values in BOTH directions.** Reversing
+  them to the top on a descending sort buries the largest values under a wall of
+  dashes. For move power, "absent" means `null` *or* `0` — `movePower` renders
+  both as "—", so both must sort the same way.
+- **A sortable column header puts its padding on the button, not the `<th>`**, so
+  the whole cell is the hit target. Label-sized targets are ~16px tall and are
+  genuinely hard to hit.
+- **The Pokémon Profile is three rails at `xl`**: reference data left, the species
+  record centre, the CRM record (notes, activity log) right. At `lg` there is room
+  for two, so the CRM rail takes `lg:col-span-2 xl:col-span-1` and runs full width
+  underneath instead of crushing the centre column.
 - **Response types are hand-written** in `lib/types.ts`. If you change a route's
   response shape, update the matching interface.
 - **`Paginator` takes the API's `pagination` object whole**, not spread fields,
@@ -481,11 +507,12 @@ at the foot of the sidebar.
 
 ### Status flags: three views of one table
 
-- **Profile → Status** — toggle buttons. Setting a flag inserts a row; unsetting
-  deletes it (`reviewed` excepted, which bumps `updated_at`).
+- **Profile → Status** — toggle buttons in the left rail. Setting a flag inserts
+  a row; unsetting deletes it (`reviewed` excepted, which bumps `updated_at`).
 - **Profile → Activity log** — the same rows as a timestamped history, newest
   first, each removable. Removing a log entry *is* clearing the flag; there is no
-  separate audit table.
+  separate audit table. It lives in the right-hand CRM rail, not beside the
+  toggles, so copy here must not say "below" or "above".
 - **Activity page** — every row across all Pokémon, filterable and sortable.
 
 **Filtering notes or activity by trainer** goes through `roster`. There is no
