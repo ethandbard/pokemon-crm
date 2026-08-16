@@ -9,6 +9,19 @@
 export const DEFAULT_OWNER = 'demo@pokemon-crm.local';
 
 /**
+ * `thick-fat` → `Thick Fat`. PokeAPI names everything in slugs, so both the seed
+ * scripts and the routes that quote a slug back to the user need this. The
+ * client has its own copy as `slugLabel` in `lib/format.ts`.
+ */
+export function titleCase(slug: string): string {
+  return slug
+    .split('-')
+    .filter(Boolean)
+    .map((part) => part[0]!.toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+/**
  * The starting user directory, written by `seed:users`.
  *
  * Demo identities, not accounts: there is no password anywhere in this app.

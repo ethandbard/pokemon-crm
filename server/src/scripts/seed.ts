@@ -38,9 +38,10 @@ import {
   type RegionalDexNumbers,
 } from '../db/schema.js';
 import { env } from '../env.js';
-import { generationForDexNumber, generationForSlug } from '../constants.js';
-import { POKEAPI, fetchJson, mapWithConcurrency, type NamedRef } from './pokeapi.js';
+import { generationForDexNumber, generationForSlug, titleCase } from '../constants.js';
+import { ENGLISH, POKEAPI, fetchJson, mapWithConcurrency, type NamedRef } from './pokeapi.js';
 import { seedTypeChart } from './seed-types.js';
+import { seedAbilities } from './seed-abilities.js';
 
 interface PokemonResponse {
   id: number;
@@ -380,14 +381,6 @@ function walkChain(chain: EvolutionChainResponse): Map<number, EvolutionFacts> {
 }
 
 /** `ho-oh` → `Ho Oh`, `porygon-z` → `Porygon Z`, `mr-mime` → `Mr Mime`. */
-function titleCase(slug: string): string {
-  return slug
-    .split('-')
-    .filter(Boolean)
-    .map((part) => part[0]!.toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
 function statValue(stats: PokemonResponse['stats'], name: string): number {
   return stats.find((s) => s.stat.name === name)?.base_stat ?? 0;
 }
@@ -396,8 +389,6 @@ function statValue(stats: PokemonResponse['stats'], name: string): number {
 function effortValue(stats: PokemonResponse['stats'], name: string): number {
   return stats.find((s) => s.stat.name === name)?.effort ?? 0;
 }
-
-const ENGLISH = (ref: NamedRef) => ref.name === 'en';
 
 /**
  * Pokédex flavour text is stored per game, so a species has ~30 entries and
@@ -974,7 +965,16 @@ async function main() {
   // 18 requests flat, independent of SEED_LIMIT and of the moves import.
   await seedTypeChart();
 
-  // --- Fifth pass: moves ---------------------------------------------------
+  // --- Fifth pass: ability effect text -------------------------------------
+  // Reads the slugs `pokemon` was just written with, so it scales with
+  // SEED_LIMIT rather than fetching all 370 abilities every time.
+  if (env.seedAbilities) {
+    await seedAbilities();
+  } else {
+    console.log('[seed] SEED_ABILITIES=false — skipping abilities; they will render as slugs.');
+  }
+
+  // --- Sixth pass: moves ---------------------------------------------------
   // The only pass that costs requests beyond the dex itself, which is why it
   // can be turned off.
   if (env.seedMoves) {

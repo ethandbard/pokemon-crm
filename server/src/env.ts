@@ -62,4 +62,10 @@ export const env = {
    * faster run; the moves pages then render their empty states.
    */
   seedMoves: (process.env.SEED_MOVES ?? 'true').toLowerCase() !== 'false',
+  /**
+   * Whether the seed imports ability effect text — one request per distinct
+   * ability the seeded dex references, ~370 for the full dex. With it off,
+   * abilities render as slugs, which is what they did before the table existed.
+   */
+  seedAbilities: (process.env.SEED_ABILITIES ?? 'true').toLowerCase() !== 'false',
 } as const;

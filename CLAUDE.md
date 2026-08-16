@@ -69,6 +69,7 @@ pokemon-crm/
 │           ├── seed.ts       # one-time PokeAPI import (idempotent)
 │           ├── pokeapi.ts    # shared PokeAPI client: fetchJson, concurrency cap
 │           ├── seed-types.ts # the 18-request type effectiveness matrix
+│           ├── seed-abilities.ts # effect text for the abilities the dex uses
 │           ├── seed-trainers.ts # demo trainers, rosters, review history
 │           └── seed-users.ts # the demo user directory
 └── client/
@@ -217,6 +218,40 @@ because PokeAPI keeps adding methods (`level-up`, `machine`, `egg`, `tutor`,
   `level-up`, 0 means "learned on evolution"**, not level zero.
 - Movepool coverage = distinct types of **non-status** moves. A Grass-type
   status move gives no Grass coverage.
+
+### `abilities`
+
+Ability effect text from `/ability/{name}`, written only by the seed
+(`seed:abilities` refreshes it alone; `seed` runs it as a pass, skippable with
+`SEED_ABILITIES=false`).
+
+- **Keyed by slug, joined slug-to-slug with no foreign key** — the same
+  arrangement as `notes.owner` → `users.email`. `pokemon.abilities` and
+  `pokemon.hidden_ability` predate this table, so every read must tolerate a miss
+  and fall back to the title-cased slug rather than dropping the ability.
+- **The slugs to fetch come from `pokemon`, not from the `/ability` index.** A
+  `SEED_LIMIT=151` run then fetches only Kanto's abilities. The full dex
+  references **284** distinct abilities, not PokeAPI's ~370 — the rest are
+  side-game only, which is why `REFERENCE_TABLES` gives this table no `expected`
+  count.
+- **Not all-or-nothing, unlike the type chart.** A missing row renders as a slug,
+  which is what the Profile showed before this table existed; a missing type-chart
+  row would instead read as a plausible wrong answer.
+
+### `roster.ability`
+
+Which ability a roster member actually has — a trainer's choice about one entry,
+not a fact about the species.
+
+- **Legality is enforced in the route, not the schema**, like `roster_moves`: the
+  value must appear in that species' `abilities` or equal its `hidden_ability`, a
+  constraint against another row's array. `PATCH /api/roster/:id` checks it.
+- Only the value being *set* is validated. A transfer moves an entry between
+  trainers, never between species, so a stored ability stays legal across one.
+- The check is point-in-time: a re-seed can rewrite `pokemon.abilities` and
+  strand a value. `GET /api/admin/overview` reports those as
+  `strandedAbilities`, split into `illegal` (species no longer lists it) and
+  `unknown` (no `abilities` row, usually a skipped import).
 
 ### `type_damage`
 
@@ -378,11 +413,11 @@ All routes are under `/api`. Responses are JSON; errors are
 | GET | `/api/health` | Liveness + DB round trip |
 | GET | `/api/pokemon` | List — `search`, `type`, `generation`, `legendary`, `activity`, `trainerId`, `minBaseStatTotal`, `maxBaseStatTotal`, `region`, `habitat`, `shape`, `eggGroup`, `growthRate`, `evYield`, `baby`, `moveId`, `learnMethod`, `moveType`, `sort`, `direction`, `page`, `pageSize` |
 | GET | `/api/pokemon/filters` | Distinct types/generations/flags/trainers/habitats/shapes/egg groups/growth rates/learn methods for dropdowns, plus the static region list |
-| GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, full movepool, movepool summary, defensive `matchups`, dex neighbours, BST percentile |
+| GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, `abilities` with effect text, full movepool, movepool summary, defensive `matchups`, dex neighbours, BST percentile |
 | GET | `/api/moves` | Move catalogue — `search`, `type`, `damageClass`, `generation`, `pokemonId`, `trainerId`, `learnMethod`, `minPower`, `maxPower`, `sort`, `direction`, pagination |
 | GET | `/api/moves/filters` | Distinct types/generations/damage classes/learn methods/ailments and the power range |
 | GET | `/api/moves/:id` | Move + paginated learners (`learnMethod`, pagination), learn-method and type breakdowns, and trainers with an active-roster learner |
-| GET | `/api/admin/overview` | Reference-table completeness, workspace counts, and owner strings with no matching user |
+| GET | `/api/admin/overview` | Reference-table completeness, workspace counts, owner strings with no matching user, and `strandedAbilities` |
 | PATCH | `/api/admin/trainers/:id/owner` | Hand a trainer to another user. **Not** guarded by current ownership — an orphaned trainer must stay recoverable |
 | POST | `/api/admin/reassign-owner` | Move everything under one owner string to another — `includeTrainers` (default true), `includeNotes`, `includeActivity` |
 | GET | `/api/users` | The whole user directory with per-user note/flag counts, plus `defaultOwner`. Unpaginated: it backs the switcher |
@@ -399,7 +434,7 @@ All routes are under `/api`. Responses are JSON; errors are
 | PATCH | `/api/trainers/:id` | Update a trainer |
 | DELETE | `/api/trainers/:id` | Delete a trainer; cascades to their roster rows |
 | POST | `/api/trainers/:id/roster` | Add a Pokémon to that trainer's roster |
-| PATCH | `/api/roster/:id` | Update nickname/level/status, or move the entry to another trainer |
+| PATCH | `/api/roster/:id` | Update nickname/level/status/`ability`, or move the entry to another trainer. Rejects an ability the species cannot have |
 | DELETE | `/api/roster/:id` | Remove a roster entry |
 | GET | `/api/roster/:id/moves` | The entry's equipped moveset, in slot order |
 | PUT | `/api/roster/:id/moves` | Replace the whole moveset (≤ 4 ids). Rejects duplicates and moves the species can't learn |
@@ -517,6 +552,11 @@ All routes are under `/api`. Responses are JSON; errors are
   editor opens over the queue so it re-ranks without navigating away.
   **Every action there changes the ranking** — a Flag button was removed for
   exactly that reason once `flagged` stopped being a signal.
+- **A field carrying prose does not belong in a `<dl>` of right-aligned values.**
+  The Profile's reference card is label-left/value-right, which works for
+  "Height: 0.4 m" and is unreadable for an ability's effect sentence. Abilities
+  therefore sit below that list as a stacked block — name, then effect beneath.
+  Anything else that gains prose moves out the same way.
 - **Response types are hand-written** in `lib/types.ts`. If you change a route's
   response shape, update the matching interface.
 - **`Paginator` takes the API's `pagination` object whole**, not spread fields,
@@ -745,7 +785,8 @@ CREATE DATABASE; without it `db:migrate` fails on a fresh machine with
 walkthrough.
 
 Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
-18-request type chart), `npm run db:generate` (new migration from schema changes),
+18-request type chart), `npm run seed:abilities` (ability effect text for the
+slugs the seeded dex references), `npm run db:generate` (new migration from schema changes),
 `npm run db:push` (dev-only direct sync), `npm run db:studio`,
 `npm run typecheck`, `npm run build`.
 
@@ -786,6 +827,9 @@ Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
   (they come with the `/pokemon` response); the move details are ~900 extra
   requests and ~30 more for version-group ordering. With it off, the moves pages
   render their empty states.
+- **`SEED_ABILITIES=false` skips ability effect text** (~284 requests on a full
+  dex). With it off, abilities render as their slugs with no prose — degraded,
+  not broken.
 - The local Postgres uses `trust` auth on localhost, so `.env` has no password.
   Azure needs `PGSSL=true` and `sslmode=require`.
 
@@ -798,7 +842,7 @@ Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
 - **build** — `npm ci`, `typecheck`, `build`, on Node 20 (the `engines` floor)
   and 22. `fail-fast` is off.
 - **migrations** — spins up a Postgres 16 service, runs `db:create` and
-  `db:migrate` **twice each**, and asserts all eleven tables exist. Adding a table
+  `db:migrate` **twice each**, and asserts all twelve tables exist. Adding a table
   means adding it to that list.
 
 **CI does not seed** — that would be ~2,600 PokéAPI requests per push, against

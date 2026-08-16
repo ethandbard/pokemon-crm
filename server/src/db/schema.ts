@@ -478,6 +478,42 @@ export const typeDamage = pgTable(
 );
 
 /**
+ * Ability effect text, from `/ability/{name}` — reference data, written only by
+ * the seed.
+ *
+ * `pokemon.abilities` and `pokemon.hidden_ability` already hold ability **slugs**;
+ * this table is what turns those slugs into prose. **There is deliberately no
+ * foreign key**, and the join is slug-to-slug — the same arrangement as
+ * `notes.owner` → `users.email`. The slug columns predate this table and a
+ * partial seed (or `SEED_ABILITIES=false`) leaves them pointing at nothing, so
+ * every read must tolerate a miss and fall back to the raw slug rather than
+ * dropping the ability from the list.
+ *
+ * Unlike the type chart this is **not** all-or-nothing: a missing row degrades
+ * to a slug, which is what the app showed before this table existed. A missing
+ * type-chart row would instead read as a plausible-looking wrong answer.
+ */
+export const abilities = pgTable(
+  'abilities',
+  {
+    /** PokeAPI's ability slug (`levitate`), which is what `pokemon.abilities` holds. */
+    slug: text('slug').primaryKey(),
+    displayName: text('display_name').notNull(),
+    /** The full effect, with PokeAPI's `$effect_chance` placeholder substituted. */
+    effect: text('effect'),
+    /** The one-line version, for places with no room for the full text. */
+    shortEffect: text('short_effect'),
+    generation: integer('generation'),
+    /**
+     * False for the handful of side-game abilities. Kept rather than filtered at
+     * seed time so a species referencing one still resolves to a name.
+     */
+    isMainSeries: boolean('is_main_series').notNull().default(true),
+  },
+  (table) => [index('abilities_generation_idx').on(table.generation)],
+);
+
+/**
  * Where a roster member sits in the trainer's line-up. The advising analogue of
  * an active/inactive caseload: `retired` keeps the history without counting
  * toward the working roster.
@@ -552,6 +588,18 @@ export const roster = pgTable(
     nickname: text('nickname'),
     level: integer('level'),
     status: rosterStatus('status').notNull().default('active'),
+    /**
+     * Which of its species' abilities this member actually has — a trainer's
+     * choice about one entry, not a fact about the species, which is why it
+     * lives here and not on `pokemon`.
+     *
+     * **Legality is enforced in the route, not here**: the value must appear in
+     * that species' `pokemon.abilities` or equal its `hidden_ability` — a
+     * constraint against another row's array, which no foreign key can express.
+     * `PATCH /api/roster/:id` validates it. Holds a slug, joined to `abilities`
+     * with no FK, so reads coalesce to the raw slug.
+     */
+    ability: text('ability'),
     acquiredAt: timestamp('acquired_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -666,3 +714,5 @@ export type TypeDamage = typeof typeDamage.$inferSelect;
 export type NewTypeDamage = typeof typeDamage.$inferInsert;
 export type RosterMove = typeof rosterMoves.$inferSelect;
 export type NewRosterMove = typeof rosterMoves.$inferInsert;
+export type Ability = typeof abilities.$inferSelect;
+export type NewAbility = typeof abilities.$inferInsert;

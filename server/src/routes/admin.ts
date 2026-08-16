@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { activity, notes, trainers, users } from '../db/schema.js';
+import { abilities, activity, notes, pokemon, roster, trainers, users } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound } from '../http.js';
 import { DEFAULT_OWNER, POKEMON_TYPES } from '../constants.js';
 
@@ -32,6 +32,18 @@ const REFERENCE_TABLES = [
     seededBy: 'npm run seed:types',
   },
   { key: 'growth_rates', label: 'Growth curves', expected: 600, seededBy: 'npm run seed' },
+  /**
+   * No `expected` — the count is however many distinct abilities the seeded dex
+   * references (284 at the full 1,025), not PokeAPI's total. A SEED_LIMIT run
+   * legitimately imports fewer, so a fixed target would report a healthy
+   * workspace as incomplete.
+   */
+  {
+    key: 'abilities',
+    label: 'Ability effects',
+    expected: null,
+    seededBy: 'npm run seed:abilities',
+  },
 ] as const;
 
 /**
@@ -57,7 +69,8 @@ adminRouter.get(
           (select count(*)::int from type_damage)     as type_damage,
           (select count(*)::int from growth_rates)    as growth_rates,
           (select count(*)::int from roster)          as roster,
-          (select count(*)::int from roster_moves)    as roster_moves
+          (select count(*)::int from roster_moves)    as roster_moves,
+          (select count(*)::int from abilities)       as abilities
       `)
     ).rows as unknown as Record<string, number>[];
 
@@ -90,6 +103,43 @@ adminRouter.get(
       order by owner
     `);
 
+    /*
+     * Roster abilities that no longer hold up.
+     *
+     * `PATCH /api/roster/:id` validates an ability against the species when it
+     * is set, but the check is a point-in-time one: a later re-seed can rewrite
+     * `pokemon.abilities` and strand a value that was legal when it was chosen.
+     * Two distinct failures, deliberately reported apart —
+     *
+     *   `unknown`  the slug has no `abilities` row, so it renders untranslated.
+     *              Usually means the ability import was skipped, not corruption.
+     *   `illegal`  the species no longer lists it. The roster entry is asserting
+     *              something the reference data contradicts.
+     *
+     * This lives here rather than in the attention queue because it is a
+     * data-health fact about the workspace, not a trainer's outstanding work.
+     */
+    const strandedAbilities = await db.execute(sql`
+      select
+        r.id                                            as "rosterId",
+        t.name                                          as "trainerName",
+        p.display_name                                  as "pokemonName",
+        r.ability                                       as "ability",
+        case
+          when not (r.ability = any(p.abilities) or r.ability = p.hidden_ability) then 'illegal'
+          else 'unknown'
+        end                                             as "reason"
+      from ${roster} r
+      join ${trainers} t on t.id = r.trainer_id
+      join ${pokemon} p on p.id = r.pokemon_id
+      where r.ability is not null
+        and (
+          not (r.ability = any(p.abilities) or r.ability = p.hidden_ability)
+          or not exists (select 1 from ${abilities} ab where ab.slug = r.ability)
+        )
+      order by t.name, p.display_name
+    `);
+
     const tables = REFERENCE_TABLES.map((table) => {
       const actual = counts?.[table.key] ?? 0;
       return {
@@ -105,6 +155,7 @@ adminRouter.get(
       counts: counts ?? {},
       tables,
       orphans: orphans.rows,
+      strandedAbilities: strandedAbilities.rows,
       defaultOwner: DEFAULT_OWNER,
     });
   }),

@@ -266,20 +266,29 @@ add a per-member column or table to the roster**, following the `roster_moves`
 rule — equipped rather than potential, keyed on the roster entry, legality
 enforced in the route. 8c is reference data only.
 
-### 8a. Abilities — `/ability/{name}`, ~370 requests
+### ✅ 8a. Abilities — DONE
 
-`pokemon.abilities` and `hidden_ability` already hold names; this adds an
-`abilities` table (slug PK, name, effect, short effect, generation,
-`is_main_series`) joined on those names. Renders abilities as prose on the
-Profile instead of slugs, and gives the Dashboard an abilities dimension.
+Migration `0010_demonic_falcon.sql` adds `abilities` (slug PK) and
+`roster.ability`. `seed-abilities.ts` imports effect text; `PATCH
+/api/roster/:id` enforces the legality rule; `/api/pokemon/:id` returns an
+`abilities` array with effect text, rendered as a stacked block on the Profile.
 
-Constraint: the join is name-to-name with no FK, same shape as `notes.owner` →
-`users.email` — it must tolerate a miss and fall back to the raw slug.
+Three findings worth keeping:
 
-Plus **`roster.ability`** (nullable): which ability this member actually has.
-Unlike a held item, this one has a real legality rule — it must be one of that
-species' `abilities` or its `hidden_ability` — enforced in `PATCH
-/api/roster/:id`, the way move legality is enforced in the moveset route.
+- **The dex references 284 distinct abilities, not ~370.** The rest are
+  side-game only. Sourcing the slugs from `pokemon` rather than the `/ability`
+  index made the import 23% smaller *and* made it scale with `SEED_LIMIT`, so
+  `REFERENCE_TABLES` gives the table no `expected` count — a fixed target would
+  report a healthy partial seed as incomplete.
+- **`titleCase` had to move to `constants.ts`.** The route quoting a slug back
+  in an error needed it, and it lived in `scripts/pokeapi.ts` where a route
+  should not reach. `ENGLISH` stayed there — it is PokéAPI-specific.
+- **Effect text cannot live in the Profile's reference `<dl>`**, which is
+  right-aligned short values. Abilities moved out to a stacked block; the rule
+  is now in CLAUDE.md § Frontend conventions.
+
+Still open: the abilities dimension on the Dashboard ships with the dashboards
+commit, not here.
 
 ### 8b. Natures — `/nature`, 25 requests
 

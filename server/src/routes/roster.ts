@@ -5,6 +5,7 @@ import { db } from '../db/client.js';
 import { moves, pokemon, pokemonMoves, roster, rosterMoves, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, forbidden, notFound } from '../http.js';
 import { ownerFor } from '../owner.js';
+import { titleCase } from '../constants.js';
 
 /**
  * Mutations on individual roster entries. Creating one lives on the trainer
@@ -47,6 +48,18 @@ const patchSchema = z
       .transform((value) => (value === '' ? null : value)),
     level: z.number().int().min(1).max(100).nullable().optional(),
     status: z.enum(roster.status.enumValues).optional(),
+    /**
+     * An ability slug. Legality is checked against the species below — the
+     * schema can only say "a string", since which strings are valid depends on
+     * another table's array.
+     */
+    ability: z
+      .string()
+      .trim()
+      .max(60)
+      .nullable()
+      .optional()
+      .transform((value) => (value === '' ? null : value)),
     /** Reassigning to another trainer — the caseload-transfer path. */
     trainerId: z.number().int().min(1).optional(),
   })
@@ -62,6 +75,36 @@ rosterRouter.patch(
     const [entry] = await db.select().from(roster).where(eq(roster.id, id)).limit(1);
     if (!entry) throw notFound(`No roster entry with id ${id}`);
     await assertOwnsTrainer(req, entry.trainerId);
+
+    // An ability must be one this species actually has. Like move legality this
+    // is a constraint against another row's contents, so no foreign key can
+    // carry it — and unlike a held item, which any Pokémon may carry, there is
+    // a real rule here to enforce.
+    //
+    // Only the value being *set* is checked. The transfer branch below moves an
+    // entry between trainers, never between species, so a stored ability stays
+    // legal across a transfer and needs no re-validation.
+    if (input.ability) {
+      const [species] = await db
+        .select({
+          displayName: pokemon.displayName,
+          abilities: pokemon.abilities,
+          hiddenAbility: pokemon.hiddenAbility,
+        })
+        .from(pokemon)
+        .where(eq(pokemon.id, entry.pokemonId))
+        .limit(1);
+
+      const legal = new Set([...(species?.abilities ?? []), species?.hiddenAbility].filter(Boolean));
+      if (!legal.has(input.ability)) {
+        // Name what it could be instead — a rejection with no alternatives is
+        // not actionable from a form.
+        const options = [...legal].map((slug) => titleCase(String(slug))).join(', ') || 'none on record';
+        throw badRequest(
+          `${species?.displayName ?? 'This Pokémon'} cannot have ${titleCase(input.ability)} — its abilities are: ${options}`,
+        );
+      }
+    }
 
     if (input.trainerId !== undefined && input.trainerId !== entry.trainerId) {
       // Both ends of a transfer must be yours. This also proves the

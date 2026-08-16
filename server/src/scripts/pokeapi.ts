@@ -16,6 +16,9 @@ export interface NamedRef {
   url: string;
 }
 
+/** Every PokeAPI text entry is multilingual; this picks the English one. */
+export const ENGLISH = (ref: NamedRef) => ref.name === 'en';
+
 export async function fetchJson<T>(url: string, attempt = 1): Promise<T> {
   const maxAttempts = 4;
   try {

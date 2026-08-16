@@ -578,6 +578,21 @@ export interface ActivityListResponse {
   pagination: Pagination;
 }
 
+/**
+ * One ability with its effect text, as `/api/pokemon/:id` returns it.
+ *
+ * `effect` is null when the ability import has not run — the row renders as a
+ * name with no prose rather than disappearing, which is what the Profile showed
+ * before the `abilities` table existed.
+ */
+export interface AbilityDetail {
+  slug: string;
+  displayName: string;
+  effect: string | null;
+  shortEffect: string | null;
+  isHidden: boolean;
+}
+
 export interface PokemonProfileResponse {
   pokemon: PokemonDetail;
   notes: Note[];
@@ -592,6 +607,16 @@ export interface PokemonProfileResponse {
     level: number | null;
     status: RosterStatus;
   }[];
+  /**
+   * This species' abilities with their effect text, in slot order, hidden one
+   * last.
+   *
+   * Distinct from `pokemon.abilities`, which is the raw slug array the column
+   * holds. The join to the `abilities` table has no foreign key, so an entry
+   * whose effect text has not been imported still appears here — `displayName`
+   * falls back to the title-cased slug and `effect` is null.
+   */
+  abilities: AbilityDetail[];
   /** The full movepool, level-up moves first in level order. */
   moves: MovepoolEntry[];
   moveSummary: MoveSummary | null;
