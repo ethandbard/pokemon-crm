@@ -12,6 +12,7 @@ import type {
 import { Card, EmptyState, ErrorState, Loading } from './ui';
 import { dexNumber } from '../lib/format';
 import { MovesetEditor } from './MovesetEditor';
+import { BuildEditor } from './BuildEditor';
 import { useToast } from './Toast';
 import { useCurrentUser } from '../lib/useCurrentUser';
 
@@ -38,6 +39,19 @@ const REASON_META: Record<AttentionReasonCode, { icon: string; short: string; to
   stale_review: {
     icon: '◔',
     short: 'Stale',
+    tone: 'border-hairline bg-plane text-ink-2',
+  },
+  // The two build signals are the lightest in the model and only fire once the
+  // moveset is complete, so they get the most recessive tone — a member here is
+  // finishing a build, not failing to have one.
+  ability_missing: {
+    icon: '◇',
+    short: 'No ability',
+    tone: 'border-hairline bg-plane text-ink-2',
+  },
+  nature_missing: {
+    icon: '◇',
+    short: 'No nature',
     tone: 'border-hairline bg-plane text-ink-2',
   },
 };
@@ -74,6 +88,7 @@ export function AttentionQueue({
   const { data, loading, error, refetch } = useApi<AttentionResponse>(path);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [editingMoveset, setEditingMoveset] = useState<AttentionItem | null>(null);
+  const [editingBuild, setEditingBuild] = useState<AttentionItem | null>(null);
 
   const maxScore = data?.data[0]?.score ?? 0;
 
@@ -210,6 +225,7 @@ export function AttentionQueue({
                   open={expanded === item.rosterId}
                   onToggle={() => setExpanded(expanded === item.rosterId ? null : item.rosterId)}
                   onSetMoves={() => setEditingMoveset(item)}
+                  onSetBuild={() => setEditingBuild(item)}
                   onChanged={refetch}
                 />
               ))}
@@ -244,6 +260,21 @@ export function AttentionQueue({
           }}
         />
       )}
+
+      {/* Same reasoning as the moveset editor above: both build signals score,
+          so saving here re-ranks the row in place. */}
+      {editingBuild && (
+        <BuildEditor
+          open
+          rosterId={editingBuild.rosterId}
+          memberName={editingBuild.nickname ?? editingBuild.displayName}
+          onClose={() => setEditingBuild(null)}
+          onSaved={() => {
+            setEditingBuild(null);
+            refetch();
+          }}
+        />
+      )}
     </Card>
   );
 }
@@ -256,6 +287,7 @@ function AttentionRow({
   open,
   onToggle,
   onSetMoves,
+  onSetBuild,
   onChanged,
 }: {
   item: AttentionItem;
@@ -265,6 +297,7 @@ function AttentionRow({
   open: boolean;
   onToggle: () => void;
   onSetMoves: () => void;
+  onSetBuild: () => void;
   onChanged: () => void;
 }) {
   const { toast } = useToast();
@@ -274,6 +307,22 @@ function AttentionRow({
   const needsMoves = item.reasons.some(
     (reason) => reason.code === 'moveset_missing' || reason.code === 'moveset_incomplete',
   );
+  const needsBuild = item.reasons.some(
+    (reason) => reason.code === 'ability_missing' || reason.code === 'nature_missing',
+  );
+
+  /**
+   * The one action the row leads with, in the order the model weights them:
+   * moves first, then the build detail, then the review.
+   *
+   * This was a ternary on `needsMoves` when there were two fix classes. It is a
+   * chain rather than a menu because the collapsed row has space for exactly one
+   * button — every other action is named in the drawer below.
+   *
+   * The build signals are gated behind a full moveset server-side, so `moves`
+   * and `build` cannot both be pending; the order still matters for readability.
+   */
+  const primary = needsMoves ? 'moves' : needsBuild ? 'build' : 'review';
 
   /**
    * Re-posting `reviewed` bumps its timestamp rather than clearing the flag
@@ -362,11 +411,11 @@ function AttentionRow({
         */}
         <button
           type="button"
-          onClick={needsMoves ? onSetMoves : markReviewed}
+          onClick={primary === 'moves' ? onSetMoves : primary === 'build' ? onSetBuild : markReviewed}
           disabled={busy}
           className="shrink-0 rounded-md border border-hairline px-2 py-1 text-xs font-medium text-ink hover:border-brand hover:text-brand disabled:opacity-50"
         >
-          {needsMoves ? 'Set moves' : 'Mark reviewed'}
+          {primary === 'moves' ? 'Set moves' : primary === 'build' ? 'Set build' : 'Mark reviewed'}
         </button>
 
         <button
@@ -402,6 +451,9 @@ function AttentionRow({
               className={actionClass}
             >
               Set moves ({item.movesetSize}/4)
+            </button>
+            <button type="button" onClick={onSetBuild} disabled={busy} className={actionClass}>
+              Set build
             </button>
             <button type="button" onClick={markReviewed} disabled={busy} className={actionClass}>
               Mark reviewed

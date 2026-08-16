@@ -2,7 +2,16 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { moves, natures, pokemon, pokemonMoves, roster, rosterMoves, trainers } from '../db/schema.js';
+import {
+  abilities,
+  moves,
+  natures,
+  pokemon,
+  pokemonMoves,
+  roster,
+  rosterMoves,
+  trainers,
+} from '../db/schema.js';
 import { asyncHandler, badRequest, forbidden, notFound } from '../http.js';
 import { ownerFor } from '../owner.js';
 import { titleCase } from '../constants.js';
@@ -169,6 +178,94 @@ rosterRouter.patch(
       .returning();
 
     res.json(updated);
+  }),
+);
+
+/**
+ * GET /api/roster/:id/build — everything the build editor needs, in one call.
+ *
+ * The entry's current ability and nature, the abilities this species may legally
+ * have, all 25 natures, and the base stats the nature panel multiplies. Bundled
+ * rather than left as three requests because the editor cannot render a single
+ * field until it has all of them, and `/api/pokemon/:id` — the only other source
+ * of the legal ability list — returns the whole movepool with it.
+ *
+ * The ability options are the same set `PATCH /api/roster/:id` validates
+ * against, built from the same two columns. The server still re-checks on write:
+ * this list is convenience, not the constraint.
+ */
+rosterRouter.get(
+  '/:id/build',
+  asyncHandler(async (req, res) => {
+    const { id } = idParamSchema.parse(req.params);
+
+    const [entry] = await db
+      .select({
+        id: roster.id,
+        pokemonId: roster.pokemonId,
+        nickname: roster.nickname,
+        ability: roster.ability,
+        nature: roster.nature,
+        displayName: pokemon.displayName,
+        abilities: pokemon.abilities,
+        hiddenAbility: pokemon.hiddenAbility,
+        hp: pokemon.hp,
+        attack: pokemon.attack,
+        defense: pokemon.defense,
+        specialAttack: pokemon.specialAttack,
+        specialDefense: pokemon.specialDefense,
+        speed: pokemon.speed,
+      })
+      .from(roster)
+      .innerJoin(pokemon, eq(pokemon.id, roster.pokemonId))
+      .where(eq(roster.id, id))
+      .limit(1);
+
+    if (!entry) throw notFound(`No roster entry with id ${id}`);
+
+    const slugs = [...entry.abilities, entry.hiddenAbility].filter(
+      (slug): slug is string => Boolean(slug),
+    );
+
+    const [abilityRows, natureRows] = await Promise.all([
+      slugs.length === 0
+        ? Promise.resolve([])
+        : db.select().from(abilities).where(inArray(abilities.slug, slugs)),
+      db.select().from(natures).orderBy(asc(natures.increasedStat), asc(natures.displayName)),
+    ]);
+
+    // Same assembly as `/api/pokemon/:id`: built from the slug list so an
+    // ability whose effect text was never imported still appears as an option
+    // rather than silently vanishing from the picker.
+    const bySlug = new Map(abilityRows.map((row) => [row.slug, row]));
+
+    res.json({
+      rosterId: entry.id,
+      pokemonId: entry.pokemonId,
+      displayName: entry.displayName,
+      nickname: entry.nickname,
+      ability: entry.ability,
+      nature: entry.nature,
+      abilityOptions: slugs.map((slug) => ({
+        slug,
+        displayName: bySlug.get(slug)?.displayName ?? titleCase(slug),
+        shortEffect: bySlug.get(slug)?.shortEffect ?? null,
+        isHidden: slug === entry.hiddenAbility,
+      })),
+      natureOptions: natureRows,
+      /**
+       * Base stats, unmodified. The nature panel applies its ±10% to these on
+       * the client — no adjusted figure is computed here, deliberately.
+       */
+      baseStats: {
+        hp: entry.hp,
+        attack: entry.attack,
+        defense: entry.defense,
+        specialAttack: entry.specialAttack,
+        specialDefense: entry.specialDefense,
+        speed: entry.speed,
+      },
+    });
   }),
 );
 

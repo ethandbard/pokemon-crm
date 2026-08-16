@@ -311,8 +311,26 @@ Two things worth keeping:
   make "+10% Attack / −10% Attack" renderable, which reads as an effect.
 
 The **nature-adjusted stat panel ships with the BuildEditor**, which is the only
-surface allowed to show those numbers — see the next item. Committing it here
-would have meant an unmounted component.
+surface allowed to show those numbers — see below. Committing it here would have
+meant an unmounted component.
+
+### ✅ 8b-2. BuildEditor and the build signals — DONE
+
+`components/BuildEditor.tsx` sets a member's ability and nature, backed by
+`GET /api/roster/:id/build` (one call: current values, legal abilities, the 25
+natures, unadjusted base stats). Opens from the roster table's **Build** column,
+the kanban board, and the attention queue. Hosts the nature-adjusted stat panel.
+
+`ability_missing` (6) and `nature_missing` (3) join the attention model,
+**gated behind `movesetSize === 4`** — rationale in CLAUDE.md § Needs-attention.
+The queue's primary button became a priority chain: moves → build → review.
+
+Verified against the live queue: the two signals fired on exactly the 7 members
+with a full moveset and nowhere else, and filling a build dropped that member's
+score by exactly 9.
+
+⚠️ **`item_missing` is not here** — `roster_items` does not exist until 8d. The
+third signal and the editor's item field land with it.
 
 ### 8c. Machines — `/machine/{id}`, ~500–900 requests
 

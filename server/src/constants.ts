@@ -60,6 +60,29 @@ export const ATTENTION = {
   staleAfterDays: 30,
   staleCap: 45,
 
+  /* ---- Build detail: ability and nature ------------------------------------
+   *
+   * Both are deliberately small, and both are **gated behind a full moveset**
+   * in `scoreFacts`. Two reasons for that shape:
+   *
+   * 1. Nothing computes with them. `movesetMissing` is 50 because an empty
+   *    moveset makes every figure on `/team` understate the roster — the weight
+   *    is paid for by a downstream consequence. A missing nature changes no
+   *    number the app reports, so it cannot rank near one that does.
+   * 2. Nothing seeds them. Ungated, every member of a fresh database would fire
+   *    both on top of `moveset_missing`, and a queue that lists everyone with
+   *    the same three chips is the roster again with extra steps.
+   *
+   * Ability is worth more than nature: it is the one with a legality rule, and
+   * it changes how a member actually behaves in a battle. Both sit below
+   * `movesetIncompletePerSlot` (8), the cost of a single empty move slot.
+   */
+
+  /** No ability recorded, on a member whose moveset is already complete. */
+  abilityMissing: 6,
+  /** No nature recorded, same gate. */
+  natureMissing: 3,
+
   /* ---- Trainer-level alerts (getRosterAlerts), not member scores ---- */
 
   /** A full party is six; below that the roster has holes to fill. */
@@ -88,7 +111,9 @@ export type AttentionReasonCode =
   | 'never_reviewed'
   | 'stale_review'
   | 'moveset_missing'
-  | 'moveset_incomplete';
+  | 'moveset_incomplete'
+  | 'ability_missing'
+  | 'nature_missing';
 
 /** Why a whole roster is flagged, independent of any one member. */
 export type RosterAlertCode = 'roster_incomplete' | 'unanswered_weakness';

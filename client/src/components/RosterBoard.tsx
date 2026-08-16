@@ -22,11 +22,14 @@ export function RosterBoard({
   roster,
   onChanged,
   onEditMoveset,
+  onEditBuild,
 }: {
   roster: RosterMember[];
   onChanged: () => void;
   /** Opens the moveset editor. The board is a full peer of the table view. */
   onEditMoveset: (member: RosterMember) => void;
+  /** Opens the build editor, for the same reason. */
+  onEditBuild: (member: RosterMember) => void;
 }) {
   const { toast } = useToast();
   const [dragging, setDragging] = useState<number | null>(null);
@@ -162,6 +165,21 @@ export function RosterBoard({
                       {member.movesetSize === 0 ? 'No moves set' : `${member.movesetSize}/4 moves`}
                     </span>
                     <span className="text-muted">Edit</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onEditBuild(member)}
+                    draggable={false}
+                    aria-label={`Edit build for ${member.nickname ?? member.displayName}`}
+                    className="mt-1 flex w-full items-center justify-between rounded-md border border-hairline px-1.5 py-1 text-[11px] hover:border-brand hover:text-brand"
+                  >
+                    {/* Not critical when unset, unlike the moveset above: no
+                        team figure depends on an ability or a nature. */}
+                    <span className="truncate text-muted">
+                      {member.abilityName ?? 'No ability'}
+                    </span>
+                    <span className="shrink-0 text-muted">Edit</span>
                   </button>
                 </li>
               ))}

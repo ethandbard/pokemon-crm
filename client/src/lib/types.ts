@@ -208,6 +208,21 @@ export interface RosterMember {
   level: number | null;
   status: RosterStatus;
   acquiredAt: string;
+
+  /** The recorded ability slug, or null. `abilityName` falls back to the slug. */
+  ability: string | null;
+  abilityName: string | null;
+  /** The recorded nature slug, or null. */
+  nature: string | null;
+  natureName: string | null;
+  /**
+   * Which stat the nature raises and lowers, as PokeAPI slugs. **Null both when
+   * no nature is set and when it is one of the five neutral ones** — check
+   * `nature` to tell those apart.
+   */
+  natureIncreasedStat: string | null;
+  natureDecreasedStat: string | null;
+
   name: string;
   displayName: string;
   generation: number;
@@ -251,15 +266,20 @@ export interface RosterMember {
 }
 
 /**
- * Why a roster member is in the queue. All four are rules over recorded facts;
+ * Why a roster member is in the queue. All six are rules over recorded facts;
  * the old `behind_pace` signal rested on an invented EXP-per-day constant and
  * was removed with it.
+ *
+ * The two build signals are the lightest in the model and **only fire once the
+ * moveset is complete** — a member with no moves is not nagged about its nature.
  */
 export type AttentionReasonCode =
   | 'moveset_missing'
   | 'moveset_incomplete'
   | 'never_reviewed'
-  | 'stale_review';
+  | 'stale_review'
+  | 'ability_missing'
+  | 'nature_missing';
 
 /** Why a whole roster is flagged, independent of any one member. */
 export type RosterAlertCode = 'roster_incomplete' | 'unanswered_weakness';
@@ -593,6 +613,38 @@ export interface Nature {
   displayName: string;
   increasedStat: string | null;
   decreasedStat: string | null;
+}
+
+/**
+ * Everything the build editor needs for one roster member, from
+ * `GET /api/roster/:id/build`.
+ *
+ * `baseStats` are unmodified — the nature's ±10% is applied on the client, and
+ * no route returns an adjusted figure. See CLAUDE.md § Natures.
+ */
+export interface RosterBuild {
+  rosterId: number;
+  pokemonId: number;
+  displayName: string;
+  nickname: string | null;
+  ability: string | null;
+  nature: string | null;
+  /** Only what this species may legally have — hidden ability included, flagged. */
+  abilityOptions: {
+    slug: string;
+    displayName: string;
+    shortEffect: string | null;
+    isHidden: boolean;
+  }[];
+  natureOptions: Nature[];
+  baseStats: {
+    hp: number;
+    attack: number;
+    defense: number;
+    specialAttack: number;
+    specialDefense: number;
+    speed: number;
+  };
 }
 
 /**

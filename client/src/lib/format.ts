@@ -87,6 +87,13 @@ export type NatureStatSlug = keyof typeof NATURE_STAT_KEYS;
 /** The multiplier a nature applies, as a percentage step. Fixed by the games. */
 export const NATURE_STEP = 0.1;
 
+/** A nature's stat slug as its display label — `special-attack` → `Sp. Atk`. */
+export function natureStatLabel(slug: string | null): string {
+  if (!slug) return '—';
+  const key = NATURE_STAT_KEYS[slug as NatureStatSlug];
+  return key ? STAT_LABELS[key] : slug;
+}
+
 /**
  * A nature's effect as a short label — `+Atk / −SpA`, or `neutral`.
  *

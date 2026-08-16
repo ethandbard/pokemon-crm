@@ -3,8 +3,10 @@ import { z } from 'zod';
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
+  abilities,
   activity,
   moves,
+  natures,
   notes,
   pokemon,
   pokemonMoves,
@@ -328,6 +330,20 @@ trainersRouter.get(
             level: roster.level,
             status: roster.status,
             acquiredAt: roster.acquiredAt,
+
+            // --- Build: the per-member choices --------------------------------
+            // Resolved to display names here so the roster table needs no second
+            // source. Both joins are LEFT and both names coalesce to the raw
+            // slug: neither column has a foreign key, so a missing reference row
+            // must degrade to the slug rather than blank the cell.
+            ability: roster.ability,
+            abilityName: sql<string | null>`coalesce(${abilities.displayName}, ${roster.ability})`,
+            nature: roster.nature,
+            natureName: sql<string | null>`coalesce(${natures.displayName}, ${roster.nature})`,
+            /** Null both for "no nature" and for the five neutral ones. */
+            natureIncreasedStat: natures.increasedStat,
+            natureDecreasedStat: natures.decreasedStat,
+
             name: pokemon.name,
             displayName: pokemon.displayName,
             generation: pokemon.generation,
@@ -418,6 +434,10 @@ trainersRouter.get(
           })
           .from(roster)
           .innerJoin(pokemon, eq(roster.pokemonId, pokemon.id))
+          // Both LEFT: an unset ability or nature is the normal case, and a set
+          // one whose reference row is missing must still yield its slug.
+          .leftJoin(abilities, eq(abilities.slug, roster.ability))
+          .leftJoin(natures, eq(natures.slug, roster.nature))
           .where(eq(roster.trainerId, id))
           // Starters first, then the rest of the working roster, retired last.
           .orderBy(

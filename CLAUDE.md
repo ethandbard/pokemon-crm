@@ -89,6 +89,7 @@ pokemon-crm/
         │   ├── TrainerForm.tsx        # create/edit a trainer
         │   ├── RosterEditor.tsx       # add / edit / transfer roster entries
         │   ├── MovesetEditor.tsx      # the four equipped moves, from the movepool
+        │   ├── BuildEditor.tsx        # a member's ability and nature
         │   ├── EvolutionProgress.tsx  # stage bar + full chain view
         │   ├── Movepool.tsx   # movepool by learn method, sortable + filterable
         │   ├── AttentionQueue.tsx     # ranked early-alert list with reasons
@@ -486,6 +487,7 @@ All routes are under `/api`. Responses are JSON; errors are
 | DELETE | `/api/trainers/:id` | Delete a trainer; cascades to their roster rows |
 | POST | `/api/trainers/:id/roster` | Add a Pokémon to that trainer's roster |
 | GET | `/api/natures` | The 25 natures. Unpaginated: it backs a picker. Returns which stat each raises/lowers, **never an adjusted number** |
+| GET | `/api/roster/:id/build` | Everything the build editor needs in one call: current ability/nature, the species' legal abilities, all 25 natures, and **unadjusted** base stats |
 | PATCH | `/api/roster/:id` | Update nickname/level/status/`ability`/`nature`, or move the entry to another trainer. Rejects an ability the species cannot have, or an unknown nature |
 | DELETE | `/api/roster/:id` | Remove a roster entry |
 | GET | `/api/roster/:id/moves` | The entry's equipped moveset, in slot order |
@@ -609,6 +611,12 @@ All routes are under `/api`. Responses are JSON; errors are
   "Height: 0.4 m" and is unreadable for an ability's effect sentence. Abilities
   therefore sit below that list as a stacked block — name, then effect beneath.
   Anything else that gains prose moves out the same way.
+- **A per-member editor takes scalar props, not an entity.** `MovesetEditor` and
+  `BuildEditor` both take `{ rosterId, memberName, … }`, which is why a
+  `RosterMember` (roster table), an `AttentionItem` (queue) and a board card can
+  all open them. Both also **unmount when closed** and remount on `key={rosterId}`
+  — `EditRosterMember` does neither, and its `useState(member?.…)` initialisers
+  do not reset between members opened in sequence. Copy the wrapper, not it.
 - **Response types are hand-written** in `lib/types.ts`. If you change a route's
   response shape, update the matching interface.
 - **`Paginator` takes the API's `pagination` object whole**, not spread fields,
@@ -729,6 +737,25 @@ former.
 `server/src/attention.ts`. **SQL gathers facts, TypeScript applies weights.**
 Every weight lives in `ATTENTION` (`constants.ts`) and produces both the score
 and the human-readable reasons.
+
+**Build signals are gated behind a full moveset.** `ability_missing` (6) and
+`nature_missing` (3) fire only when `movesetSize === 4`. Both reasons:
+
+- **Nothing computes with them.** `movesetMissing` is 50 because an empty
+  moveset makes every figure on `/team` understate the roster — the weight is
+  paid for by a downstream consequence. A missing nature changes no number the
+  app reports, so it cannot rank near one that does. Both sit below
+  `movesetIncompletePerSlot` (8), the cost of one empty move slot.
+- **Nothing seeds them.** Ungated, every member of a fresh database would fire
+  both on top of `moveset_missing` — three chips on every row, which is the
+  roster wearing a queue's clothing. Gated, the queue reads as a progression:
+  get the moves in, then finish the build.
+
+Removing `movesetSize === 4` from that condition in `scoreFacts` ungates them.
+
+**The queue's primary button is a priority chain, not a ternary**: moves →
+build → review. The collapsed row has space for one button; every other action
+is named in the drawer.
 
 **Two lists, deliberately not one.**
 
