@@ -69,19 +69,25 @@ function BuildEditorBody({
   // the form seed itself from the fetch without a useEffect.
   const [ability, setAbility] = useState<string | undefined>(undefined);
   const [nature, setNature] = useState<string | undefined>(undefined);
+  const [item, setItem] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
 
   const chosenAbility = ability ?? data?.ability ?? '';
   const chosenNature = nature ?? data?.nature ?? '';
+  const chosenItem = item ?? data?.item ?? '';
   const natureRow = data?.natureOptions.find((option) => option.slug === chosenNature) ?? null;
 
   async function save() {
     setSaving(true);
     try {
+      // Two writes: ability and nature are columns on the roster entry, the item
+      // is a row in `roster_items`. Sequential rather than parallel so a failure
+      // on the first does not leave the second applied.
       await api.patch(`/api/roster/${rosterId}`, {
         ability: chosenAbility || null,
         nature: chosenNature || null,
       });
+      await api.put(`/api/roster/${rosterId}/item`, { itemSlug: chosenItem || null });
       toast(`Build saved for ${memberName}`, { tone: 'success' });
       onSaved();
       onClose();
@@ -97,7 +103,7 @@ function BuildEditorBody({
       open
       onClose={onClose}
       title={`Build — ${memberName}`}
-      description={`The ability and nature ${memberName} carries. Neither changes the team analysis, which is measured from equipped moves.`}
+      description={`The ability, nature and held item ${memberName} carries. None of them change the team analysis, which is measured from equipped moves.`}
       width="max-w-lg"
     >
       {loading ? (
@@ -154,6 +160,42 @@ function BuildEditorBody({
             <p className="rounded-md border border-hairline bg-plane px-3 py-2 text-xs leading-relaxed text-muted">
               {data.abilityOptions.find((option) => option.slug === chosenAbility)?.shortEffect ??
                 'No effect text imported for this ability.'}
+            </p>
+          )}
+
+          {/*
+            The item picker is a plain select over the whole catalogue, not a
+            search: unlike moves there is no per-species rule to narrow it by, so
+            every one of the ~400 holdable items is legal for every member. The
+            seed already did the only filtering there is.
+          */}
+          <Field
+            label="Held item"
+            hint={
+              data.itemOptions.length === 0
+                ? 'No items imported — run npm run seed:items'
+                : 'Any Pokémon can hold any of these'
+            }
+          >
+            <select
+              className={fieldClass}
+              value={chosenItem}
+              onChange={(event) => setItem(event.target.value)}
+              disabled={data.itemOptions.length === 0}
+            >
+              <option value="">Not set</option>
+              {data.itemOptions.map((option) => (
+                <option key={option.slug} value={option.slug}>
+                  {option.displayName}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {chosenItem && (
+            <p className="rounded-md border border-hairline bg-plane px-3 py-2 text-xs leading-relaxed text-muted">
+              {data.itemOptions.find((option) => option.slug === chosenItem)?.shortEffect ??
+                'No effect text imported for this item.'}
             </p>
           )}
 

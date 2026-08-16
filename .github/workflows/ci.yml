@@ -100,9 +100,9 @@ jobs:
           PGPASSWORD=postgres psql -h localhost -U postgres -d pokemon_crm \
             -v ON_ERROR_STOP=1 -c "
               select 'missing table: ' || t
-              from unnest(array['pokemon','notes','activity','trainers','roster','growth_rates','moves','pokemon_moves','users','type_damage','roster_moves','abilities','natures','move_machines']) t
+              from unnest(array['pokemon','notes','activity','trainers','roster','growth_rates','moves','pokemon_moves','users','type_damage','roster_moves','abilities','natures','move_machines','items','roster_items']) t
               where to_regclass('public.' || t) is null;
-            " -t | grep -q 'missing table' && exit 1 || echo 'all fourteen tables present'
+            " -t | grep -q 'missing table' && exit 1 || echo 'all sixteen tables present'
 
 # Deliberately NOT run here: `npm run seed`.
 #

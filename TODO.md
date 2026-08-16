@@ -329,8 +329,7 @@ Verified against the live queue: the two signals fired on exactly the 7 members
 with a full moveset and nowhere else, and filling a build dropped that member's
 score by exactly 9.
 
-⚠️ **`item_missing` is not here** — `roster_items` does not exist until 8d. The
-third signal and the editor's item field land with it.
+`item_missing` (4) landed with 8d, completing the three.
 
 ### ✅ 8c. Machines — DONE
 
@@ -352,28 +351,25 @@ Three findings:
   keeping only the latest machine per move, which the per-game history rules out.
   `SEED_MACHINES=false` skips it.
 
-### 8d. Held items — `/item/{name}`, scoped
+### ✅ 8d. Held items — DONE
 
-Two halves, and only the second needs new tables:
+Migration `0013_last_rogue.sql` adds `items` (403 rows) and `roster_items`.
+`seed-items.ts` imports them; `PUT /api/roster/:id/item` is the only writer; the
+BuildEditor gained its third field and `item_missing` (4) joined the attention
+model on the same full-moveset gate.
 
-- Effect text for the held items already named in `pokemon.held_items` — a few
-  hundred distinct items, self-limiting.
-- **`roster_items`** — the item a roster member actually carries. Mirrors
-  `roster_moves`: one row per roster entry, equipped rather than potential,
-  written by one route (`PUT /api/roster/:id/item`). One item per entry, so no
-  slot mechanic.
+Three things worth keeping:
 
-⚠️ **There is no per-species legality rule for items** — any Pokémon can hold
-any held item. The moveset route's join-constraint has no analogue here; the
-only check is that the item is holdable. Do not assume otherwise.
+- **403 items from ~450 requests, not 2,180.** Scope is 17 battle-relevant
+  categories (17 index calls) unioned with every slug in `pokemon.held_items`.
+- **A rejected item is not reported as unknown.** Master Ball is a real item and
+  still fails the check, because it is not in the holdable scope — saying "no
+  such item" would send someone hunting a typo.
+- **Clearing an item deletes a row**, which is why this is its own PUT rather
+  than a field on `PATCH /api/roster/:id`.
 
-Team analysis does **not** read items initially. An item that changes a matchup
-(Focus Sash, resist berries) means matchup logic in `effectiveness.ts`, which is
-a separate decision — coverage figures must not shift under a label that has not
-been re-argued.
-
-Do **not** import all ~2,180 items; scope the fetch to battle-relevant
-categories.
+Still deliberately true: **team analysis does not read items**, and there is no
+per-species legality rule to build a recommendation on.
 
 ---
 

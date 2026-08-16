@@ -80,6 +80,9 @@ export const ATTENTION = {
 
   /** No ability recorded, on a member whose moveset is already complete. */
   abilityMissing: 6,
+  /** No held item, same gate. Between the other two: an item does change a
+   *  battle, but unlike an ability it has no legality rule and no default. */
+  itemMissing: 4,
   /** No nature recorded, same gate. */
   natureMissing: 3,
 
@@ -113,6 +116,7 @@ export type AttentionReasonCode =
   | 'moveset_missing'
   | 'moveset_incomplete'
   | 'ability_missing'
+  | 'item_missing'
   | 'nature_missing';
 
 /** Why a whole roster is flagged, independent of any one member. */

@@ -801,6 +801,9 @@ function TrainerDashboard({
                                 )}`
                               : 'No nature'}
                           </span>
+                          <span className="block text-[11px] text-muted">
+                            {member.heldItemName ?? 'No item'}
+                          </span>
                         </td>
                         <td className="px-2 py-2">
                           <EvolutionProgress

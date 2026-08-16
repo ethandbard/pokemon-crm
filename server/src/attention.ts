@@ -1,6 +1,14 @@
 import { sql, type SQL } from 'drizzle-orm';
 import { db } from './db/client.js';
-import { activity, moves, pokemon, roster, rosterMoves, trainers } from './db/schema.js';
+import {
+  activity,
+  moves,
+  pokemon,
+  roster,
+  rosterItems,
+  rosterMoves,
+  trainers,
+} from './db/schema.js';
 import { ATTENTION, type AttentionReasonCode, type RosterAlertCode } from './constants.js';
 import {
   loadTypeChart,
@@ -42,6 +50,8 @@ interface AttentionFacts {
   ability: string | null;
   /** The recorded nature slug, or null. Same gate. */
   nature: string | null;
+  /** The held item slug, or null. Same gate. */
+  heldItem: string | null;
 }
 
 export interface AttentionReason {
@@ -102,6 +112,13 @@ export function scoreFacts(facts: AttentionFacts): AttentionItem {
         code: 'ability_missing',
         points: ATTENTION.abilityMissing,
         label: 'No ability recorded',
+      });
+    }
+    if (!facts.heldItem) {
+      reasons.push({
+        code: 'item_missing',
+        points: ATTENTION.itemMissing,
+        label: 'No held item',
       });
     }
     if (!facts.nature) {
@@ -175,7 +192,13 @@ async function loadFacts(trainerId?: number, scope?: SQL): Promise<AttentionFact
       -- they are set, and resolving a display name here would be work the
       -- queue never uses.
       r.ability                                              as "ability",
-      r.nature                                               as "nature"
+      r.nature                                               as "nature",
+
+      -- Correlated subquery, so the inner table is aliased and the outer
+      -- reference qualified: roster_items has its own roster_id column.
+      (
+        select ri.item_slug from ${rosterItems} ri where ri.roster_id = r.id
+      )                                                      as "heldItem"
 
     from ${roster} r
     join ${pokemon} p on p.id = r.pokemon_id

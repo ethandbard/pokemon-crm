@@ -1,14 +1,16 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, eq, inArray, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
   abilities,
+  items,
   moves,
   natures,
   pokemon,
   pokemonMoves,
   roster,
+  rosterItems,
   rosterMoves,
   trainers,
 } from '../db/schema.js';
@@ -227,11 +229,31 @@ rosterRouter.get(
       (slug): slug is string => Boolean(slug),
     );
 
-    const [abilityRows, natureRows] = await Promise.all([
+    const [abilityRows, natureRows, itemRows, [heldItem]] = await Promise.all([
       slugs.length === 0
         ? Promise.resolve([])
         : db.select().from(abilities).where(inArray(abilities.slug, slugs)),
       db.select().from(natures).orderBy(asc(natures.increasedStat), asc(natures.displayName)),
+      /*
+       * Every holdable item, unfiltered by species — there is no per-species
+       * rule for items, so the whole catalogue is legal for every member. ~400
+       * rows, which is why this ships whole rather than behind a search: the
+       * seed already scoped it to what can actually be held.
+       */
+      db
+        .select({
+          slug: items.slug,
+          displayName: items.displayName,
+          category: items.category,
+          shortEffect: items.shortEffect,
+        })
+        .from(items)
+        .orderBy(asc(items.displayName)),
+      db
+        .select({ itemSlug: rosterItems.itemSlug })
+        .from(rosterItems)
+        .where(eq(rosterItems.rosterId, id))
+        .limit(1),
     ]);
 
     // Same assembly as `/api/pokemon/:id`: built from the slug list so an
@@ -253,6 +275,10 @@ rosterRouter.get(
         isHidden: slug === entry.hiddenAbility,
       })),
       natureOptions: natureRows,
+      /** The item this member carries, or null. */
+      item: heldItem?.itemSlug ?? null,
+      /** The whole holdable catalogue — no per-species rule to filter it by. */
+      itemOptions: itemRows,
       /**
        * Base stats, unmodified. The nature panel applies its ±10% to these on
        * the client — no adjusted figure is computed here, deliberately.
@@ -378,6 +404,82 @@ rosterRouter.put(
     });
 
     res.json({ moveset: await movesetFor(id) });
+  }),
+);
+
+/**
+ * The held item, as an item slug — or null to carry nothing.
+ *
+ * A PUT rather than a field on `PATCH /api/roster/:id` because it writes a
+ * different table, and "clear the item" is a delete there rather than a null
+ * column. One item per member, so there is no slot to address.
+ */
+const itemSchema = z.object({
+  itemSlug: z
+    .string()
+    .trim()
+    .max(60)
+    .nullable()
+    .transform((value) => (value === '' ? null : value)),
+});
+
+/** PUT /api/roster/:id/item */
+rosterRouter.put(
+  '/:id/item',
+  asyncHandler(async (req, res) => {
+    const { id } = idParamSchema.parse(req.params);
+    const { itemSlug } = itemSchema.parse(req.body);
+
+    const [entry] = await db
+      .select({ id: roster.id, trainerId: roster.trainerId })
+      .from(roster)
+      .where(eq(roster.id, id))
+      .limit(1);
+    if (!entry) throw notFound(`No roster entry with id ${id}`);
+    await assertOwnsTrainer(req, entry.trainerId);
+
+    if (itemSlug === null) {
+      await db.delete(rosterItems).where(eq(rosterItems.rosterId, id));
+      res.json({ item: null });
+      return;
+    }
+
+    /*
+     * The only check there is.
+     *
+     * Unlike a moveset — where a move must appear in `pokemon_moves` for that
+     * species — **any Pokémon can hold any held item**, so there is no
+     * per-species rule to enforce. This validates that the slug names a real
+     * item and nothing more. Do not add a species constraint here expecting one
+     * to exist; see the note on `roster_items` in schema.ts.
+     */
+    const [known] = await db
+      .select({ slug: items.slug, displayName: items.displayName })
+      .from(items)
+      .where(eq(items.slug, itemSlug))
+      .limit(1);
+
+    if (!known) {
+      // Deliberately not "no such item": the seed imports only the categories
+      // worth equipping, so a real but non-battle item (a Poké Ball, mail) lands
+      // here too. Saying it is unknown would send someone hunting a typo.
+      throw badRequest(
+        `${titleCase(itemSlug)} is not one of the held items this app tracks` +
+          ` — if the picker is empty, run \`npm run seed:items\``,
+      );
+    }
+
+    // One row per member, so the unique index on roster_id turns this into an
+    // update when they already carry something.
+    await db
+      .insert(rosterItems)
+      .values({ rosterId: id, itemSlug })
+      .onConflictDoUpdate({
+        target: rosterItems.rosterId,
+        set: { itemSlug: sql`excluded.item_slug`, updatedAt: new Date() },
+      });
+
+    res.json({ item: { slug: known.slug, displayName: known.displayName } });
   }),
 );
 

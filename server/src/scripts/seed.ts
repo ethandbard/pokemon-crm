@@ -44,6 +44,7 @@ import { seedTypeChart } from './seed-types.js';
 import { seedAbilities } from './seed-abilities.js';
 import { seedNatures } from './seed-natures.js';
 import { seedMachines } from './seed-machines.js';
+import { seedItems } from './seed-items.js';
 
 interface PokemonResponse {
   id: number;
@@ -989,7 +990,16 @@ async function main() {
   // 26 requests flat and independent of everything else, like the type chart.
   await seedNatures();
 
-  // --- Seventh pass: moves --------------------------------------------------
+  // --- Seventh pass: holdable items -----------------------------------------
+  // Scoped to the battle-relevant categories plus what the dex references, so
+  // ~450 requests rather than the ~2,180 a full item import would cost.
+  if (env.seedItems) {
+    await seedItems();
+  } else {
+    console.log('[seed] SEED_ITEMS=false — skipping items; held items render as slugs.');
+  }
+
+  // --- Eighth pass: moves ---------------------------------------------------
   // The only pass that costs requests beyond the dex itself, which is why it
   // can be turned off.
   if (env.seedMoves) {

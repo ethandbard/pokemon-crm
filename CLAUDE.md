@@ -73,6 +73,7 @@ pokemon-crm/
 │           ├── seed-abilities.ts # effect text for the abilities the dex uses
 │           ├── seed-natures.ts # the 25 natures
 │           ├── seed-machines.ts # TM numbers, per move per game
+│           ├── seed-items.ts   # holdable items, scoped to battle categories
 │           ├── seed-trainers.ts # demo trainers, rosters, review history
 │           └── seed-users.ts # the demo user directory
 └── client/
@@ -222,6 +223,33 @@ because PokeAPI keeps adding methods (`level-up`, `machine`, `egg`, `tutor`,
   `level-up`, 0 means "learned on evolution"**, not level zero.
 - Movepool coverage = distinct types of **non-status** moves. A Grass-type
   status move gives no Grass coverage.
+
+### `items` and `roster_items`
+
+Holdable items, and which one a roster member carries.
+
+- **Scoped, not the full catalogue.** The seed imports 17 battle-relevant
+  categories (`held-items`, `choice`, `type-enhancement`, plates, berries that
+  fire in battle, …) plus every slug in `pokemon.held_items` — **403 rows from
+  ~450 requests**, against ~2,180 for every item. Poké Balls, mail and curry
+  ingredients are not carried into a fight, and importing them would put 1,700
+  rows in a picker to reach three of them.
+- ⚠️ **There is no per-species legality rule, unlike abilities and moves.** Any
+  Pokémon can hold any held item. `PUT /api/roster/:id/item` checks only that
+  the slug is a known item. Do not add a species constraint expecting one, and
+  **do not build a "recommended item" affordance** — with no rule to derive one
+  from, any recommendation would be invented, which is `expPerDay` again.
+- A rejected item is **not** reported as unknown: a real but non-battle item
+  (Master Ball) fails the same check, and "no such item" would send someone
+  hunting a typo.
+- **One item per member**, so `roster_items` is unique on `roster_id` with no
+  slot column — the four-slot mechanic `roster_moves` needs has no analogue.
+  Clearing an item deletes the row rather than nulling a column, which is why
+  this is a PUT of its own and not a field on `PATCH /api/roster/:id`.
+- Team analysis does **not** read items. An item that changes a matchup (Focus
+  Sash, resist berries) would mean matchup logic in `effectiveness.ts` — a
+  separate decision, so coverage figures do not shift under a label nobody
+  re-argued.
 
 ### `move_machines`
 
@@ -508,7 +536,8 @@ All routes are under `/api`. Responses are JSON; errors are
 | DELETE | `/api/trainers/:id` | Delete a trainer; cascades to their roster rows |
 | POST | `/api/trainers/:id/roster` | Add a Pokémon to that trainer's roster |
 | GET | `/api/natures` | The 25 natures. Unpaginated: it backs a picker. Returns which stat each raises/lowers, **never an adjusted number** |
-| GET | `/api/roster/:id/build` | Everything the build editor needs in one call: current ability/nature, the species' legal abilities, all 25 natures, and **unadjusted** base stats |
+| GET | `/api/roster/:id/build` | Everything the build editor needs in one call: current ability/nature/item, the species' legal abilities, all 25 natures, the whole item catalogue, and **unadjusted** base stats |
+| PUT | `/api/roster/:id/item` | Set or clear the held item (`itemSlug: null` clears). Checks only that the slug is a known item — **no per-species rule exists** |
 | PATCH | `/api/roster/:id` | Update nickname/level/status/`ability`/`nature`, or move the entry to another trainer. Rejects an ability the species cannot have, or an unknown nature |
 | DELETE | `/api/roster/:id` | Remove a roster entry |
 | GET | `/api/roster/:id/moves` | The entry's equipped moveset, in slot order |
@@ -759,8 +788,9 @@ former.
 Every weight lives in `ATTENTION` (`constants.ts`) and produces both the score
 and the human-readable reasons.
 
-**Build signals are gated behind a full moveset.** `ability_missing` (6) and
-`nature_missing` (3) fire only when `movesetSize === 4`. Both reasons:
+**Build signals are gated behind a full moveset.** `ability_missing` (6),
+`item_missing` (4) and `nature_missing` (3) fire only when `movesetSize === 4`.
+Two reasons:
 
 - **Nothing computes with them.** `movesetMissing` is 50 because an empty
   moveset makes every figure on `/team` understate the roster — the weight is
@@ -888,7 +918,7 @@ Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
 18-request type chart), `npm run seed:abilities` (ability effect text for the
 slugs the seeded dex references), `npm run seed:natures` (the 25 natures),
 `npm run seed:machines` (TM numbers — ~2,400 requests, needs `moves` seeded),
-`npm run db:generate` (new migration from schema changes),
+`npm run seed:items` (~450 requests), `npm run db:generate` (new migration from schema changes),
 `npm run db:push` (dev-only direct sync), `npm run db:studio`,
 `npm run typecheck`, `npm run build`.
 
@@ -935,6 +965,8 @@ slugs the seeded dex references), `npm run seed:natures` (the 25 natures),
 - **`SEED_MACHINES=false` skips TM numbers** (~2,400 requests — the most
   expensive pass after the dex itself). Movepool rows still say a move is
   machine-taught, just not which machine. Needs `moves` seeded first.
+- **`SEED_ITEMS=false` skips holdable items** (~450 requests). With it off, held
+  items render as slugs and the build editor's item picker is empty.
 - The local Postgres uses `trust` auth on localhost, so `.env` has no password.
   Azure needs `PGSSL=true` and `sslmode=require`.
 
@@ -947,7 +979,7 @@ slugs the seeded dex references), `npm run seed:natures` (the 25 natures),
 - **build** — `npm ci`, `typecheck`, `build`, on Node 20 (the `engines` floor)
   and 22. `fail-fast` is off.
 - **migrations** — spins up a Postgres 16 service, runs `db:create` and
-  `db:migrate` **twice each**, and asserts all fourteen tables exist. Adding a table
+  `db:migrate` **twice each**, and asserts all sixteen tables exist. Adding a table
   means adding it to that list.
 
 **CI does not seed** — that would be ~2,600 PokéAPI requests per push, against

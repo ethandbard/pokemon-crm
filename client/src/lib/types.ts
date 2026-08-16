@@ -244,6 +244,9 @@ export interface RosterMember {
    */
   natureIncreasedStat: string | null;
   natureDecreasedStat: string | null;
+  /** The held item slug, or null. `heldItemName` falls back to the slug. */
+  heldItem: string | null;
+  heldItemName: string | null;
 
   name: string;
   displayName: string;
@@ -301,6 +304,7 @@ export type AttentionReasonCode =
   | 'never_reviewed'
   | 'stale_review'
   | 'ability_missing'
+  | 'item_missing'
   | 'nature_missing';
 
 /** Why a whole roster is flagged, independent of any one member. */
@@ -659,6 +663,19 @@ export interface RosterBuild {
     isHidden: boolean;
   }[];
   natureOptions: Nature[];
+  /** The held item slug, or null. */
+  item: string | null;
+  /**
+   * The whole holdable catalogue (~400), **not filtered by species** — any
+   * Pokémon can hold any held item, so there is nothing to filter by. The seed
+   * already scoped this to items that can actually be held.
+   */
+  itemOptions: {
+    slug: string;
+    displayName: string;
+    category: string | null;
+    shortEffect: string | null;
+  }[];
   baseStats: {
     hp: number;
     attack: number;

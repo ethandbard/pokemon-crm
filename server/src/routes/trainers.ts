@@ -5,12 +5,14 @@ import { db } from '../db/client.js';
 import {
   abilities,
   activity,
+  items,
   moves,
   natures,
   notes,
   pokemon,
   pokemonMoves,
   roster,
+  rosterItems,
   rosterMoves,
   trainers,
 } from '../db/schema.js';
@@ -343,6 +345,20 @@ trainersRouter.get(
             /** Null both for "no nature" and for the five neutral ones. */
             natureIncreasedStat: natures.increasedStat,
             natureDecreasedStat: natures.decreasedStat,
+            /*
+             * The held item, via a correlated subquery rather than a third left
+             * join: `roster_items` has its own `roster_id`, so the outer
+             * reference must be qualified (CLAUDE.md § API conventions).
+             */
+            heldItem: sql<string | null>`(
+              select ri.item_slug from ${rosterItems} ri where ri.roster_id = ${roster}.id
+            )`,
+            heldItemName: sql<string | null>`(
+              select coalesce(it.display_name, ri.item_slug)
+              from ${rosterItems} ri
+              left join ${items} it on it.slug = ri.item_slug
+              where ri.roster_id = ${roster}.id
+            )`,
 
             name: pokemon.name,
             displayName: pokemon.displayName,

@@ -48,6 +48,8 @@ const REFERENCE_TABLES = [
   { key: 'natures', label: 'Natures', expected: 25, seededBy: 'npm run seed:natures' },
   /** One row per (move, game); the count tracks how many moves were seeded. */
   { key: 'move_machines', label: 'TM numbers', expected: null, seededBy: 'npm run seed:machines' },
+  /** Scoped to holdable categories, so no fixed target — see schema.ts § items. */
+  { key: 'items', label: 'Held items', expected: null, seededBy: 'npm run seed:items' },
 ] as const;
 
 /**
@@ -76,7 +78,9 @@ adminRouter.get(
           (select count(*)::int from roster_moves)    as roster_moves,
           (select count(*)::int from abilities)       as abilities,
           (select count(*)::int from natures)         as natures,
-          (select count(*)::int from move_machines)   as move_machines
+          (select count(*)::int from move_machines)   as move_machines,
+          (select count(*)::int from items)           as items,
+          (select count(*)::int from roster_items)    as roster_items
       `)
     ).rows as unknown as Record<string, number>[];
 

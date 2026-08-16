@@ -75,4 +75,11 @@ export const env = {
    * machine-taught, just not which machine.
    */
   seedMachines: (process.env.SEED_MACHINES ?? 'true').toLowerCase() !== 'false',
+  /**
+   * Whether the seed imports holdable items — ~450 requests, scoped to the
+   * battle-relevant categories plus what `pokemon.held_items` references. With
+   * it off, held items render as slugs and the build editor's item picker is
+   * empty.
+   */
+  seedItems: (process.env.SEED_ITEMS ?? 'true').toLowerCase() !== 'false',
 } as const;

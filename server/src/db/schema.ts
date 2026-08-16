@@ -514,6 +514,65 @@ export const abilities = pgTable(
 );
 
 /**
+ * Items a Pokémon can hold — reference data, written only by the seed.
+ *
+ * **Deliberately not all ~2,180 items.** The seed fetches the battle-relevant
+ * categories (`held-items`, `choice`, `type-enhancement`, plates, berries that
+ * trigger in battle, …) plus every slug already named in `pokemon.held_items`.
+ * Poké Balls, mail, curry ingredients and TMs are not things a roster member
+ * carries into a fight, and importing them would put 1,700 rows in a picker to
+ * make three of them reachable.
+ *
+ * Joined slug-to-slug with **no foreign key** from `roster_items.item_slug`, the
+ * same arrangement as `abilities` and `natures` — reads coalesce to the slug.
+ */
+export const items = pgTable(
+  'items',
+  {
+    /** PokeAPI's item slug (`leftovers`). */
+    slug: text('slug').primaryKey(),
+    displayName: text('display_name').notNull(),
+    /** PokeAPI's item category (`held-items`, `type-enhancement`, …). */
+    category: text('category'),
+    effect: text('effect'),
+    shortEffect: text('short_effect'),
+    spriteUrl: text('sprite_url'),
+    /** Base power when thrown with Fling; null for most items. */
+    flingPower: integer('fling_power'),
+  },
+  (table) => [index('items_category_idx').on(table.category)],
+);
+
+/**
+ * The item a roster member actually carries — the equipped half, like
+ * `roster_moves`.
+ *
+ * ⚠️ **There is no per-species legality rule here, unlike abilities and moves.**
+ * Any Pokémon can hold any held item; the games impose no restriction worth
+ * modelling. `PUT /api/roster/:id/item` checks only that the slug is a known
+ * item. Do not add a species constraint expecting one to exist, and do not build
+ * a "recommended item" affordance on top of this — with no rule to derive one
+ * from, any recommendation would be invented.
+ *
+ * One item per member, so this is keyed uniquely on `roster_id` and has no slot
+ * column — the four-slot mechanic `roster_moves` needs has no analogue.
+ */
+export const rosterItems = pgTable(
+  'roster_items',
+  {
+    id: serial('id').primaryKey(),
+    rosterId: integer('roster_id')
+      .notNull()
+      .references(() => roster.id, { onDelete: 'cascade' })
+      .unique(),
+    itemSlug: text('item_slug').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('roster_items_item_idx').on(table.itemSlug)],
+);
+
+/**
  * Which TM (or HM, or TR) teaches a move, per game — reference data, written
  * only by the seed.
  *
@@ -802,3 +861,7 @@ export type Nature = typeof natures.$inferSelect;
 export type NewNature = typeof natures.$inferInsert;
 export type MoveMachine = typeof moveMachines.$inferSelect;
 export type NewMoveMachine = typeof moveMachines.$inferInsert;
+export type Item = typeof items.$inferSelect;
+export type NewItem = typeof items.$inferInsert;
+export type RosterItem = typeof rosterItems.$inferSelect;
+export type NewRosterItem = typeof rosterItems.$inferInsert;

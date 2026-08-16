@@ -49,6 +49,11 @@ const REASON_META: Record<AttentionReasonCode, { icon: string; short: string; to
     short: 'No ability',
     tone: 'border-hairline bg-plane text-ink-2',
   },
+  item_missing: {
+    icon: '◇',
+    short: 'No item',
+    tone: 'border-hairline bg-plane text-ink-2',
+  },
   nature_missing: {
     icon: '◇',
     short: 'No nature',
@@ -308,7 +313,10 @@ function AttentionRow({
     (reason) => reason.code === 'moveset_missing' || reason.code === 'moveset_incomplete',
   );
   const needsBuild = item.reasons.some(
-    (reason) => reason.code === 'ability_missing' || reason.code === 'nature_missing',
+    (reason) =>
+      reason.code === 'ability_missing' ||
+      reason.code === 'item_missing' ||
+      reason.code === 'nature_missing',
   );
 
   /**

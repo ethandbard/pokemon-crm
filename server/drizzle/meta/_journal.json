@@ -92,6 +92,13 @@
       "when": 1786850572520,
       "tag": "0012_reflective_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1786851940906,
+      "tag": "0013_last_rogue",
+      "breakpoints": true
     }
   ]
 }
