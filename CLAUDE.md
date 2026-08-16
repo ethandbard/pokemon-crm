@@ -48,6 +48,7 @@ pokemon-crm/
 │       ├── constants.ts      # DEFAULT_OWNER, SEED_USERS, types, generations, ATTENTION
 │       ├── owner.ts          # resolves who a write is attributed to
 │       ├── attention.ts      # needs-attention scorer
+│       ├── effectiveness.ts  # type chart cache + defensive matchups
 │       ├── http.ts           # HttpError, asyncHandler, error middleware
 │       ├── db/
 │       │   ├── schema.ts     # Drizzle table definitions (source of truth)
@@ -62,9 +63,12 @@ pokemon-crm/
 │       │   ├── notes.ts      # cross-Pokémon feed + full CRUD
 │       │   ├── activity.ts   # status flag toggle + feed
 │       │   ├── stats.ts      # dashboard aggregations
-│       │   └── users.ts      # the "acting as" directory
+│       │   ├── users.ts      # the "acting as" directory
+│       │   └── admin.ts      # workspace health + owner reassignment
 │       └── scripts/
 │           ├── seed.ts       # one-time PokeAPI import (idempotent)
+│           ├── pokeapi.ts    # shared PokeAPI client: fetchJson, concurrency cap
+│           ├── seed-types.ts # the 18-request type effectiveness matrix
 │           ├── seed-trainers.ts # demo trainers, rosters, review history
 │           └── seed-users.ts # the demo user directory
 └── client/
@@ -81,8 +85,9 @@ pokemon-crm/
         │   ├── Modal.tsx     # native <dialog> wrapper + form field helpers
         │   ├── TrainerForm.tsx        # create/edit a trainer
         │   ├── RosterEditor.tsx       # add / edit / transfer roster entries
+        │   ├── MovesetEditor.tsx      # the four equipped moves, from the movepool
         │   ├── EvolutionProgress.tsx  # stage bar + full chain view
-        │   ├── Movepool.tsx   # movepool grouped by learn method + coverage
+        │   ├── Movepool.tsx   # movepool by learn method, sortable + filterable
         │   ├── AttentionQueue.tsx     # ranked early-alert list with reasons
         │   ├── CommandPalette.tsx     # ⌘K global jump-to
         │   ├── Toast.tsx     # ToastProvider, useToast, confirmable(), useHotkey
@@ -97,6 +102,8 @@ pokemon-crm/
         │   ├── useSavedViews.ts # localStorage-backed filter presets
         │   ├── useCurrentUser.tsx # the acting user + labelFor()
         │   ├── types.ts      # hand-written API response shapes
+        │   ├── page.ts       # PAGE_CONTAINER — the shared page content column
+        │   ├── charts.ts     # SERIES_*, axisProps, tooltipProps — chart chrome
         │   └── format.ts     # type colors, unit + date formatting
         └── pages/
             ├── Home.tsx      # landing page: counters + links to every page
@@ -105,7 +112,9 @@ pokemon-crm/
             ├── Profile.tsx   # detail + movepool + notes + activity log
             ├── Moves.tsx     # move catalogue table
             ├── MoveProfile.tsx # one move: effect, learners, rosters
-            ├── Dashboard.tsx # EDA charts (filterable)
+            ├── Team.tsx      # one trainer's roster: coverage, threats, readiness
+            ├── Admin.tsx     # ownership, users, orphans, data health (ungated)
+            ├── Dashboard.tsx # dex-wide EDA charts (filterable)
             ├── Notes.tsx     # cross-Pokémon note feed
             ├── Activity.tsx  # cross-Pokémon status-flag table
             └── Tableau.tsx   # embedded Tableau Public workbook
@@ -121,10 +130,12 @@ pokemon-crm/
 | `/pokemon/:id` | Pokémon Profile |
 | `/moves` | Move catalogue — reads `?pokemonId=` and `?trainerId=` to scope |
 | `/moves/:id` | Move detail — effect, learners, trainers who can field it |
-| `/dashboard` | Performance Dashboard |
+| `/team` | Team Dashboard — one trainer's roster analysed; `?trainerId=` selects |
+| `/dashboard` | Performance Dashboard (dex-wide) |
 | `/notes` | Notes — reads `?trainerId=` to scope to one roster |
 | `/activity` | Activity — reads `?trainerId=` to scope to one roster |
 | `/tableau` | Tableau Dashboard |
+| `/admin` | Admin — ownership, users, orphaned attribution, data health. **Ungated** |
 
 Anything unmatched redirects to `/`. **`/` is the landing page, not the
 lookup** — link to `/lookup` when you mean the table.
@@ -207,6 +218,24 @@ because PokeAPI keeps adding methods (`level-up`, `machine`, `egg`, `tutor`,
 - Movepool coverage = distinct types of **non-status** moves. A Grass-type
   status move gives no Grass coverage.
 
+### `type_damage`
+
+The type effectiveness matrix, from `/type/{name}` — 18 requests, written only
+by the seed (`npm run seed:types` refreshes it without a full dex import).
+
+- **The full 18 × 18 grid is stored (324 rows), not just the non-neutral pairs.**
+  PokeAPI reports only the exceptions. Storing it that way makes every consumer
+  coalesce a missing row to 1×, and a join that drops a pair then reads as an
+  immunity rather than as a bug.
+- **`multiplier` is hundredths** — 0, 50, 100, 200 — because dual types multiply
+  (a 4× weakness is `200 × 200 / 100`) and the scale has exactly four values.
+- **Only the offensive lists (`..._to`) are read** when seeding. PokeAPI reports
+  every relation twice, once from each side; applying both writes each cell
+  twice with no tiebreak if they ever disagree.
+- **All 18 types must fetch successfully or nothing is written.** A missing
+  attacker leaves its row at the 100 default, which reads as "hits everything
+  neutrally" — wrong, and plausible-looking.
+
 ### `users`
 
 The directory behind the "acting as" switcher. **Attribution, not
@@ -234,6 +263,58 @@ whole workspace.
 `owner` holds the acting user's email — see `users` above. Writes that name no
 acting user fall back to `DEFAULT_OWNER` (`server/src/constants.ts`).
 
+### Trainer ownership
+
+`trainers.owner` holds a `users.email` — who manages that trainer.
+
+- ⚠️ **Not `trainers.email`.** That column already existed and is the trainer's
+  *own contact address* (`ash@pokemon-crm.local`), a different namespace from
+  `SEED_USERS`. Overloading it would silently re-attribute every trainer.
+- **Visibility, not security.** The acting user is an unverified header, so this
+  scopes and guards by convention. Switching users hands you their trainers, and
+  the UI copy says so.
+- **Reads scope; writes guard.** `?scope=mine|all` (default `mine`) filters
+  trainer-aware lists. Writes to a trainer you don't own return **403** — from
+  `assertOwned` in `routes/trainers.ts` and `assertOwnsTrainer` in
+  `routes/roster.ts`, which is where all six write paths funnel. A transfer must
+  clear **both** ends.
+- **The predicate is written once**, as `trainerScope` / `trainerScopeSql` in
+  `owner.ts`. It is applied in `routes/trainers.ts`, `pokemon.ts` (Lookup's
+  trainer filter), `moves.ts`, and `attention.ts`. Add a new trainer-aware query
+  and it uses the helper — eight hand-written copies is how one drifts.
+- **Notes and Activity are deliberately unscoped**, including their trainer
+  filter dropdowns: those pages are workspace-visible, so a filter that could
+  only reach your own trainers couldn't narrow rows you can plainly see.
+- **`stats.ts` needs no scoping** — the dex-wide dashboard never referenced
+  trainers at all.
+- **`BulkActionBar` always requests `scope=mine`**, ignoring the toggle: its
+  dropdown is a *write* target, and offering a trainer you can't write to is an
+  option that can only fail.
+- The client mirrors the rule rather than duplicating it: `isMine` on the
+  trainer dashboard disables every write control and names the owner.
+
+### The admin page
+
+`/admin` (`pages/Admin.tsx`, `routes/admin.ts`) — ownership, users, orphaned
+attribution, and data health.
+
+- **Ungated, and says so on the page.** There is no auth and `users.role` is
+  display-only, so an "admins only" check would be a fiction over an unverified
+  header. It grants nothing new either: anyone could already inherit a trainer
+  by switching users.
+- **Reassignment ignores current ownership**, unlike every other trainer write.
+  A trainer whose owner no longer exists would otherwise be unrecoverable.
+- **Reassigning to an unknown email is refused** — that would manufacture the
+  orphan this page exists to clear.
+- **Moving `activity` de-duplicates first.** The table is unique on
+  `(pokemon, owner, kind)`, so a flag moving onto an owner who already has the
+  same one collides; the source row is dropped, since the destination already
+  records the fact.
+- **Notes and flags are opt-in** when reassigning: inheriting a caseload is not
+  the same as claiming authorship of someone's write-ups.
+- The trainer dropdown keeps an unknown owner as a visible `(unknown)` option
+  rather than silently displaying whoever sorts first.
+
 ### `trainers` and `roster`
 
 Advising analogy: trainer = advisor, roster = caseload, Pokémon = student.
@@ -254,6 +335,24 @@ metrics there must filter the same way and be labelled "active roster".
 Notes and activity are **not** attached to trainers. A trainer's history is
 derived by joining through `roster`. Notes written *about a trainer* would need
 a new column or table — don't overload the existing ones.
+
+### `roster_moves`
+
+The moves a roster member **actually carries** — one row per filled slot, `slot`
+1–4. This is the table that makes coverage analysis mean anything.
+
+- **`roster_moves` is equipped; `pokemon_moves` is learnable.** Charizard can
+  learn 131 moves and carries four. Coverage computed from the learnable pool
+  reports nearly every roster as covering nearly every type, which is why the
+  old figure was useless for team building. Anything answering "can this team
+  handle X" must read `roster_moves`.
+- **Keyed on the roster entry, not the species** — two trainers carrying the
+  same Pokémon run different movesets.
+- **Legality is enforced in the route, not the schema.** A move must appear in
+  `pokemon_moves` for that entry's species — a constraint against a join, which
+  no foreign key can express. `PUT /api/roster/:id/moves` checks it and is the
+  only thing that may write this table.
+- Unique on `(roster_id, slot)` and on `(roster_id, move_id)`.
 
 ### `activity`
 
@@ -279,16 +378,19 @@ All routes are under `/api`. Responses are JSON; errors are
 | GET | `/api/health` | Liveness + DB round trip |
 | GET | `/api/pokemon` | List — `search`, `type`, `generation`, `legendary`, `activity`, `trainerId`, `minBaseStatTotal`, `maxBaseStatTotal`, `region`, `habitat`, `shape`, `eggGroup`, `growthRate`, `evYield`, `baby`, `moveId`, `learnMethod`, `moveType`, `sort`, `direction`, `page`, `pageSize` |
 | GET | `/api/pokemon/filters` | Distinct types/generations/flags/trainers/habitats/shapes/egg groups/growth rates/learn methods for dropdowns, plus the static region list |
-| GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, full movepool, movepool summary, dex neighbours, BST percentile |
+| GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, full movepool, movepool summary, defensive `matchups`, dex neighbours, BST percentile |
 | GET | `/api/moves` | Move catalogue — `search`, `type`, `damageClass`, `generation`, `pokemonId`, `trainerId`, `learnMethod`, `minPower`, `maxPower`, `sort`, `direction`, pagination |
 | GET | `/api/moves/filters` | Distinct types/generations/damage classes/learn methods/ailments and the power range |
 | GET | `/api/moves/:id` | Move + paginated learners (`learnMethod`, pagination), learn-method and type breakdowns, and trainers with an active-roster learner |
+| GET | `/api/admin/overview` | Reference-table completeness, workspace counts, and owner strings with no matching user |
+| PATCH | `/api/admin/trainers/:id/owner` | Hand a trainer to another user. **Not** guarded by current ownership — an orphaned trainer must stay recoverable |
+| POST | `/api/admin/reassign-owner` | Move everything under one owner string to another — `includeTrainers` (default true), `includeNotes`, `includeActivity` |
 | GET | `/api/users` | The whole user directory with per-user note/flag counts, plus `defaultOwner`. Unpaginated: it backs the switcher |
 | POST | `/api/users` | Create a user |
 | PATCH | `/api/users/:id` | Update `name` / `role` / `initials`. **Not `email`** |
 | DELETE | `/api/users/:id` | Remove the identity; their notes and flags stay. Refuses on `DEFAULT_OWNER` |
-| GET | `/api/trainers` | All trainers with roster size and mean BST — `search` (name, region, specialty). Unpaginated: it backs a select control |
-| GET | `/api/attention` | Needs-attention queue — `trainerId` (omit for workspace-wide), `limit`. Returns each item's `score` and `reasons`, plus the `model` constants |
+| GET | `/api/trainers` | Trainers with roster size and mean BST — `search` (name, region, specialty), `scope=mine\|all` (default `mine`). Unpaginated: it backs a select control |
+| GET | `/api/attention` | Needs-attention queue — `trainerId` (omit for workspace-wide), `limit`. Returns each item's `score` and `reasons`, trainer-level `alerts` + `alertsTotal`, plus the `model` constants |
 | POST | `/api/activity/bulk` | Set or clear one flag across many Pokémon (explicit target state, not a toggle) |
 | POST | `/api/notes/bulk` | Write the same note against many Pokémon |
 | POST | `/api/trainers/:id/roster/bulk` | Add many Pokémon to a roster; already-present ones are skipped, not an error |
@@ -299,7 +401,10 @@ All routes are under `/api`. Responses are JSON; errors are
 | POST | `/api/trainers/:id/roster` | Add a Pokémon to that trainer's roster |
 | PATCH | `/api/roster/:id` | Update nickname/level/status, or move the entry to another trainer |
 | DELETE | `/api/roster/:id` | Remove a roster entry |
-| GET | `/api/notes` | Cross-Pokémon feed — `search`, `pokemonId`, `owner`, `trainerId`, `sort`, `direction`, pagination. Also returns `owners` and `trainers` for the filter dropdowns |
+| GET | `/api/roster/:id/moves` | The entry's equipped moveset, in slot order |
+| PUT | `/api/roster/:id/moves` | Replace the whole moveset (≤ 4 ids). Rejects duplicates and moves the species can't learn |
+| GET | `/api/trainers/:id/analysis` | Team analysis from **equipped** movesets — `offense`, `defense`, `gaps`, `threats`, `readiness` |
+| GET | `/api/notes` | Cross-Pokémon feed — `search` (note body **or** Pokémon name), `pokemonId`, `owner`, `trainerId`, `sort`, `direction`, pagination. Also returns `owners` and `trainers` for the filter dropdowns |
 | POST | `/api/notes` | Create |
 | PATCH | `/api/notes/:id` | Update body |
 | DELETE | `/api/notes/:id` | Delete |
@@ -379,6 +484,39 @@ All routes are under `/api`. Responses are JSON; errors are
   loaded. Use `Loading`, `ErrorState`, `EmptyState` from `components/ui.tsx`.
 - **API paths are relative** (`/api/...`); Vite proxies them to `localhost:4000`
   in dev.
+- **Every page's outermost element uses `PAGE_CONTAINER`** (`lib/page.ts`), never
+  its own `max-w-*`. One width for all routes keeps the content box from shifting
+  sideways on navigation and keeps identical toolbars wrapping at the same point.
+- **Cards in a grid put their footer row on `mt-auto`** inside a `flex h-full
+  flex-col` card. Grid rows stretch cards to a common height, so a footer that
+  merely follows variable-length copy lands at a different y in each card.
+- **List surfaces sort from their column headers, not a sort dropdown.** The
+  header drives the API's `sort`/`direction`; clicking the active column flips
+  direction, and a new column starts descending for timestamps, ascending for
+  names.
+- **A surface whose search spans more than one field highlights the match.**
+  Notes searches note text and Pokémon name together, so without the mark it is
+  not clear which column a row matched on. Escape the term before it becomes a
+  pattern, and highlight the *debounced* term so the marks agree with the rows.
+- **Client-side column sorts sink absent values in BOTH directions.** Reversing
+  them to the top on a descending sort buries the largest values under a wall of
+  dashes. For move power, "absent" means `null` *or* `0` — `movePower` renders
+  both as "—", so both must sort the same way.
+- **A sortable column header puts its padding on the button, not the `<th>`**, so
+  the whole cell is the hit target. Label-sized targets are ~16px tall and are
+  genuinely hard to hit.
+- **The Pokémon Profile is three rails at `xl`**: reference data left, the species
+  record centre, the CRM record (notes, activity log) right. At `lg` there is room
+  for two, so the CRM rail takes `lg:col-span-2 xl:col-span-1` and runs full width
+  underneath instead of crushing the centre column.
+- **A surface that reports a problem offers the fix in place.** The attention
+  queue's only affordance used to be the Pokémon's name, which leads to its
+  profile — a page with no roster attachment and therefore no way to edit the
+  moveset the queue was asking for. Each row now carries named actions (Set
+  moves, Mark reviewed, and links to the profile and roster), and the moveset
+  editor opens over the queue so it re-ranks without navigating away.
+  **Every action there changes the ranking** — a Flag button was removed for
+  exactly that reason once `flagged` stopped being a signal.
 - **Response types are hand-written** in `lib/types.ts`. If you change a route's
   response shape, update the matching interface.
 - **`Paginator` takes the API's `pagination` object whole**, not spread fields,
@@ -409,6 +547,10 @@ Two colour systems, kept apart:
 
 ### Charting
 
+**The chrome lives in `lib/charts.ts`** — `SERIES_1..4`, `axisProps`,
+`tooltipProps`, `BAR_RADIUS`. Import them; do not redeclare them per page. They
+were duplicated verbatim across two pages before a third arrived.
+
 - **Single-series charts** use `--color-series-1` and carry **no legend**; the
   card title names the measure. Multi-series charts always have a legend.
 - **Never a second y-axis.** Two measures on different scales become two charts.
@@ -438,27 +580,100 @@ Consequences worth knowing:
 - "Most widely learned moves" counts learners **within the scope** rather than
   reading `moves.learned_by_count`, which is dex-wide.
 
+### Type effectiveness
+
+`server/src/effectiveness.ts`. Same split as `attention.ts`: **SQL fetches the
+324-row chart, TypeScript does the arithmetic.**
+
+- **The chart never leaves the server.** Callers get conclusions — what a species
+  is weak to — not the matrix. `/api/pokemon/:id` returns `matchups` with
+  `weaknesses` / `resistances` / `immunities`, worst-first and best-first
+  respectively.
+- **Neutral matchups are omitted** from all three lists. They are most of the 18
+  and carry no signal.
+- The matrix is **loaded once and cached** for the life of the process. A
+  rejection is not cached, so a first call before the seed has run can be
+  retried; `resetTypeChart()` drops it.
+- **An unknown type contributes a neutral 100, never a 0** — an absent row must
+  not read as an immunity.
+- Multipliers stay hundredths end to end; `effectivenessLabel` in
+  `lib/format.ts` renders them (`200` → "2×", `50` → "½×", `0` → "No effect").
+
+### Roster analysis: equipped vs. learnable
+
+The distinction runs through the whole feature and is easy to reintroduce:
+
+- **Equipped** (`roster_moves`) answers "does this team work". It backs
+  `GET /api/trainers/:id/analysis`, the Team analysis card, and the roster
+  table's Moveset column.
+- **Learnable** (`pokemon_moves`) answers "what could this team become". It
+  backs the "Movepool coverage (potential)" card, which is **labelled as
+  potential** precisely because the unqualified version misled.
+
+A new figure about team strength reads `roster_moves`. If it reads
+`pokemon_moves`, it is a ceiling, and its label must say so.
+
+Rules the analysis follows, all in `server/src/effectiveness.ts`:
+
+- **Status moves give no coverage** — a Grass-type status move is not Grass
+  coverage. Same rule the movepool figures already used.
+- Coverage is scored against the **18 single types**, not every dual-type
+  pairing. That is what "coverage" conventionally means, and the pairwise
+  version is a much larger question.
+- A **gap** is a type nothing on the team hits for extra damage. A **threat** is
+  a type that hits 2+ members hard *and* is a gap — either alone is survivable.
+- The analysis endpoint scopes to the **active roster**, like every other
+  trainer aggregate.
+- **`answeredBy` is not `members.length`.** The first counts members with a
+  super-effective answer; the second ties on the best result even when that
+  result is neutral. Charts asking "how many can answer this" want `answeredBy`.
+
+Two dashboards, deliberately distinct: **`/team`** analyses one trainer's roster,
+**`/dashboard`** explores the whole dex. A figure about one roster belongs on the
+former.
+
 ### Needs-attention scoring
 
 `server/src/attention.ts`. **SQL gathers facts, TypeScript applies weights.**
 Every weight lives in `ATTENTION` (`constants.ts`) and produces both the score
 and the human-readable reasons.
 
-Five signals: never reviewed, stale review, flagged, milestone overdue, behind
-pace. Retired roster members are never scored.
+**Two lists, deliberately not one.**
 
-**`expPerDay` is a simulation constant, not a measurement** — PokeAPI gives
-EXP-per-level, never EXP-per-day. It is surfaced in the API response and printed
-under the queue in the UI. Tune it if rosters read as uniformly ahead or behind.
+- `getAttentionQueue()` — **member-level**: moveset missing, moveset incomplete,
+  never reviewed, stale review. Retired members are never scored.
+- `getRosterAlerts()` — **trainer-level**: roster short of a full party, and a
+  type that hits `sharedWeaknessMembers` or more members with no super-effective
+  reply.
 
-Two seeding dependencies, both of which silently disable signals if lost:
+They stay separate because a roster alert has no `rosterId`, sprite, level or
+species. Folding it into the member queue would leave half of every item null.
 
-- **`roster.acquired_at` must be backdated** — it defaults to `now()`, which
-  gives every member zero days on roster and disables the pace signal.
-  `seed:trainers` spreads tenure.
-- **Some review history must exist**, or "never reviewed" fires for nearly every
-  member. `seed:trainers` reviews two thirds of roster Pokémon, but only those
-  with **no** activity rows, so hand-set flags are never overwritten.
+**Every threshold is now a rule over recorded facts.** The model used to include
+`behind_pace`, which rested on `expPerDay` — an assumed EXP-per-day training rate
+with no equivalent anywhere in PokeAPI, which reported a simulation as a finding.
+It is gone, along with `flagged` and `milestone_overdue`; the queue is about
+whether a roster is ready, not a mix of readiness, hand-raised concerns and level
+bookkeeping. **Do not reintroduce a signal that depends on an invented rate.**
+
+Consequences of that removal, worth knowing:
+
+- **Nothing reads `growth_rates`** (600 rows) any more. The table and its seed
+  stay — cheap, and real reference data — but no code path touches it.
+- **`roster.acquired_at` no longer gates a signal.** `seed:trainers` still
+  backdates it and `daysOnRoster` is still returned, but nothing scores on it.
+- **Evolution readiness did not disappear from the app** — the trainer
+  dashboard's "Ready to evolve" card still reads `milestoneEligible`. It is no
+  longer an *alert*, which is the distinction.
+
+Still true: **some review history must exist**, or "never reviewed" fires for
+nearly every member. `seed:trainers` reviews two thirds of roster Pokémon, but
+only those with **no** activity rows, so hand-set flags are never overwritten.
+
+**Alerts cap on the workspace-wide view only.** Scoped to one trainer every alert
+ships — a roster with six unanswered weaknesses has six, and hiding three would
+misrepresent it. Across ten rosters that is ~38 rows above a queue capped at 8,
+so `/api/attention` without `trainerId` caps and returns `alertsTotal` alongside.
 
 ### The acting user
 
@@ -481,11 +696,12 @@ at the foot of the sidebar.
 
 ### Status flags: three views of one table
 
-- **Profile → Status** — toggle buttons. Setting a flag inserts a row; unsetting
-  deletes it (`reviewed` excepted, which bumps `updated_at`).
+- **Profile → Status** — toggle buttons in the left rail. Setting a flag inserts
+  a row; unsetting deletes it (`reviewed` excepted, which bumps `updated_at`).
 - **Profile → Activity log** — the same rows as a timestamped history, newest
   first, each removable. Removing a log entry *is* clearing the flag; there is no
-  separate audit table.
+  separate audit table. It lives in the right-hand CRM rail, not beside the
+  toggles, so copy here must not say "below" or "above".
 - **Activity page** — every row across all Pokémon, filterable and sortable.
 
 **Filtering notes or activity by trainer** goes through `roster`. There is no
@@ -528,7 +744,8 @@ CREATE DATABASE; without it `db:migrate` fails on a fresh machine with
 `database "pokemon_crm" does not exist`. See README for the first-run
 walkthrough.
 
-Other scripts: `npm run seed:users`, `npm run db:generate` (new migration from schema changes),
+Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
+18-request type chart), `npm run db:generate` (new migration from schema changes),
 `npm run db:push` (dev-only direct sync), `npm run db:studio`,
 `npm run typecheck`, `npm run build`.
 
@@ -538,6 +755,10 @@ Other scripts: `npm run seed:users`, `npm run db:generate` (new migration from s
   config as CJS, which can't load the ESM-only `env.ts` (`import.meta.url`). The
   config reads `.env` directly. An env var both need must be added in both
   places.
+- **`db/schema.ts` must not import anything but drizzle**, for the same reason —
+  drizzle-kit loads it as CJS and `MODULE_NOT_FOUND`s on `../constants.js`.
+  `trainers.owner` therefore repeats `DEFAULT_OWNER` as a literal default; keep
+  the two in step by hand.
 - **The scrolling `<main>` in `App.tsx` must stay `relative`.** `.sr-only` is
   `position: absolute`, so without a positioned ancestor those elements resolve
   against the document, sit outside `main`'s overflow clipping, and stretch
@@ -577,7 +798,7 @@ Other scripts: `npm run seed:users`, `npm run db:generate` (new migration from s
 - **build** — `npm ci`, `typecheck`, `build`, on Node 20 (the `engines` floor)
   and 22. `fail-fast` is off.
 - **migrations** — spins up a Postgres 16 service, runs `db:create` and
-  `db:migrate` **twice each**, and asserts all nine tables exist. Adding a table
+  `db:migrate` **twice each**, and asserts all eleven tables exist. Adding a table
   means adding it to that list.
 
 **CI does not seed** — that would be ~2,600 PokéAPI requests per push, against
@@ -601,4 +822,5 @@ proxy that forwards `/api` to the Express server.
 ## Not yet built
 
 See [TODO.md](TODO.md). In short: no auth (users are an unverified "acting as"
-switcher — see § `users`), no tests, no dark mode, and a single ~720 kB JS chunk.
+switcher — see § `users` and § Trainer ownership), no tests, no dark mode, and a
+single ~740 kB JS chunk.

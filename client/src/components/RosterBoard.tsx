@@ -21,9 +21,12 @@ const COLUMNS: RosterStatus[] = ['starter', 'active', 'reserve', 'retired'];
 export function RosterBoard({
   roster,
   onChanged,
+  onEditMoveset,
 }: {
   roster: RosterMember[];
   onChanged: () => void;
+  /** Opens the moveset editor. The board is a full peer of the table view. */
+  onEditMoveset: (member: RosterMember) => void;
 }) {
   const { toast } = useToast();
   const [dragging, setDragging] = useState<number | null>(null);
@@ -144,6 +147,22 @@ export function RosterBoard({
                       eligible={member.milestoneEligible}
                     />
                   </div>
+
+                  {/* The board is the other half of the roster surface, so it
+                      carries the same moveset state and the same way in — a
+                      member with no moves is invisible here otherwise. */}
+                  <button
+                    type="button"
+                    onClick={() => onEditMoveset(member)}
+                    draggable={false}
+                    aria-label={`Edit moveset for ${member.nickname ?? member.displayName}`}
+                    className="mt-2 flex w-full items-center justify-between rounded-md border border-hairline px-1.5 py-1 text-[11px] hover:border-brand hover:text-brand"
+                  >
+                    <span className={member.movesetSize === 0 ? 'text-status-critical' : 'text-muted'}>
+                      {member.movesetSize === 0 ? 'No moves set' : `${member.movesetSize}/4 moves`}
+                    </span>
+                    <span className="text-muted">Edit</span>
+                  </button>
                 </li>
               ))}
 

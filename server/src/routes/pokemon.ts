@@ -5,6 +5,8 @@ import { db } from '../db/client.js';
 import { activity, moves, notes, pokemon, pokemonMoves, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
 import { POKEMON_TYPES, REGIONS, REGION_POKEDEXES } from '../constants.js';
+import { defensiveProfile, loadTypeChart } from '../effectiveness.js';
+import { scopeSchema, trainerScope } from '../owner.js';
 
 export const pokemonRouter = Router();
 
@@ -244,7 +246,9 @@ pokemonRouter.get(
 /** GET /api/pokemon/filters — distinct values used to populate filter dropdowns. */
 pokemonRouter.get(
   '/filters',
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req, res) => {
+    const { scope } = z.object({ scope: scopeSchema }).parse(req.query);
+
     const [
       types,
       generations,
@@ -268,6 +272,8 @@ pokemonRouter.get(
         db
           .select({ id: trainers.id, name: trainers.name })
           .from(trainers)
+          // Lookup's trainer filter is a roster surface, so it scopes.
+          .where(trainerScope(req, scope))
           .orderBy(asc(trainers.name)),
         db.execute<{ value: string }>(
           sql`select distinct habitat as value from ${pokemon} where habitat is not null order by 1`,
@@ -444,6 +450,10 @@ pokemonRouter.get(
       })
       .from(pokemon);
 
+    // Defensive matchups. Computed here rather than shipped as a matrix — see
+    // effectiveness.ts. Neutral types are omitted from all three lists.
+    const matchups = defensiveProfile(await loadTypeChart(), record.type1, record.type2);
+
     res.json({
       pokemon: record,
       notes: noteRows,
@@ -451,6 +461,7 @@ pokemonRouter.get(
       trainers: trainerRows,
       moves: moveRows,
       moveSummary: moveSummary.rows[0] ?? null,
+      matchups,
       evolution: {
         chain: chainRows,
         stage: record.evolutionStage,

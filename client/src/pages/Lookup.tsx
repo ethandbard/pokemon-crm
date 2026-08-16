@@ -17,6 +17,8 @@ import { ACTIVITY_META, dexNumber, slugLabel, titleCase } from '../lib/format';
 import { PageHeader } from '../components/PageHeader';
 import { BulkActionBar } from '../components/BulkActionBar';
 import { SavedViews } from '../components/SavedViews';
+import { PAGE_CONTAINER } from '../lib/page';
+import { useCurrentUser } from '../lib/useCurrentUser';
 
 const COLUMNS = [
   { key: 'id', label: '#', numeric: true },
@@ -49,6 +51,7 @@ export function LookupPage() {
   // Seeded from ?search= so links in from elsewhere (e.g. the profile's quick
   // search) land with the term already applied.
   const [searchParams] = useSearchParams();
+  const { scope } = useCurrentUser();
   const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
   const [type, setType] = useState('');
   const [generation, setGeneration] = useState('');
@@ -163,7 +166,9 @@ export function LookupPage() {
   );
 
   const { data, loading, error, refetch } = useApi<PokemonListResponse>(listPath);
-  const filters = useApi<FilterOptions>('/api/pokemon/filters');
+  // The trainer dropdown in these options is scoped; every other list it
+  // returns is dex-wide and unaffected.
+  const filters = useApi<FilterOptions>(`/api/pokemon/filters${toQueryString({ scope })}`);
   // Null path skips the fetch entirely when no move filter is set — see
   // CLAUDE.md § frontend conventions.
   const activeMove = useApi<MoveDetailResponse>(
@@ -246,7 +251,7 @@ export function LookupPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] px-8 py-7">
+    <div className={PAGE_CONTAINER}>
       <PageHeader
         title="Pokémon Lookup"
         description="Search and filter the full National Pokédex. Select a row to open its profile."

@@ -18,13 +18,49 @@ import { NoteActions } from '../components/NoteEditor';
 import { SavedViews } from '../components/SavedViews';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { dexNumber, formatDate } from '../lib/format';
+import { PAGE_CONTAINER } from '../lib/page';
 
-const SORT_OPTIONS = [
-  { value: 'createdAt', label: 'Date created' },
-  { value: 'updatedAt', label: 'Date updated' },
-  { value: 'pokemon', label: 'Pokémon name' },
-  { value: 'owner', label: 'Owner' },
-] as const;
+/**
+ * `key` is the API's `sort` value; a column without one doesn't sort. Kept in
+ * step with the SORTABLE allow-list in `server/src/routes/notes.ts`.
+ */
+const COLUMNS: { key: string | null; label: string; align?: 'right' }[] = [
+  { key: 'pokemon', label: 'Pokémon' },
+  { key: null, label: 'Note' },
+  { key: 'owner', label: 'Author' },
+  { key: 'createdAt', label: 'Created' },
+  { key: 'updatedAt', label: 'Updated' },
+  { key: null, label: '', align: 'right' },
+];
+
+/**
+ * Marks the searched term inside a result so it's obvious why a row matched —
+ * which matters here because the search spans both the note text and the
+ * Pokémon's name, and the hit is often in the column you weren't reading.
+ */
+function Highlight({ text, term }: { text: string; term: string }) {
+  const needle = term.trim();
+  if (!needle) return <>{text}</>;
+
+  // The term is raw user input, so escape it before it becomes a pattern.
+  const pattern = new RegExp(`(${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'ig');
+  const parts = text.split(pattern);
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        // String.split with one capture group puts the matches at odd indices.
+        i % 2 === 1 ? (
+          <mark key={i} className="rounded-sm bg-brand/15 px-0.5 text-ink">
+            {part}
+          </mark>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
+}
 
 export function NotesPage() {
   // Seeded from ?trainerId= so the trainer dashboard can link straight to a
@@ -60,8 +96,19 @@ export function NotesPage() {
   usePageClamp(data?.pagination, setPage);
   const hasFilters = Boolean(search || owner || trainerId);
 
+  function toggleSort(key: string) {
+    if (sort === key) {
+      setDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSort(key);
+      // Timestamps are most useful newest-first; names ascending.
+      setDirection(key === 'createdAt' || key === 'updatedAt' ? 'desc' : 'asc');
+    }
+    setPage(1);
+  }
+
   return (
-    <div className="mx-auto max-w-[1100px] px-8 py-7">
+    <div className={PAGE_CONTAINER}>
       <PageHeader
         title="Notes"
         description="Every note across every Pokémon. Add notes from a Pokémon's profile."
@@ -75,9 +122,9 @@ export function NotesPage() {
             setSearch(e.target.value);
             setPage(1);
           }}
-          placeholder="Search note text…"
-          aria-label="Search notes"
-          className="w-64"
+          placeholder="Search note text or Pokémon…"
+          aria-label="Search note text or Pokémon name"
+          className="w-72"
         />
 
         <Select
@@ -130,17 +177,8 @@ export function NotesPage() {
           ))}
         </Select>
 
-        <Select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort notes by">
-          {SORT_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              Sort: {option.label}
-            </option>
-          ))}
-        </Select>
-
-        <Button onClick={() => setDirection((d) => (d === 'asc' ? 'desc' : 'asc'))}>
-          {direction === 'asc' ? 'Ascending ▲' : 'Descending ▼'}
-        </Button>
+        {/* Sorting lives on the column headers, as it does on every other
+            table in the app — no sort dropdown here. */}
 
         {hasFilters && (
           <Button
@@ -200,50 +238,122 @@ export function NotesPage() {
           />
         ) : (
           <>
-            <ul className={loading ? 'opacity-60 transition-opacity' : undefined}>
-              {data.data.map((note) => (
-                <li key={note.id} className="border-b border-hairline last:border-0 p-5">
-                  <div className="flex items-start gap-4">
-                    <Link
-                      to={`/pokemon/${note.pokemonId}`}
-                      className="flex w-40 shrink-0 flex-col items-center gap-1.5 rounded-lg p-2 hover:bg-plane"
-                    >
-                      {note.pokemonSpriteUrl && (
-                        <img
-                          src={note.pokemonSpriteUrl}
-                          alt=""
-                          width={56}
-                          height={56}
-                          loading="lazy"
-                          className="h-14 w-14"
-                        />
-                      )}
-                      <span className="text-sm font-medium text-ink">{note.pokemonName}</span>
-                      <span className="text-xs tabular-nums text-muted">
-                        {dexNumber(note.pokemonId)}
-                      </span>
-                      <span className="flex gap-1">
-                        <TypeBadge type={note.pokemonType1} />
-                        {note.pokemonType2 && <TypeBadge type={note.pokemonType2} />}
-                      </span>
-                    </Link>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-hairline text-xs text-muted">
+                    {COLUMNS.map((column) => {
+                      // Bound to a local so the narrowing survives into the
+                      // deferred onClick closure.
+                      const sortKey = column.key;
+                      const isActive = sortKey !== null && sort === sortKey;
 
-                    <div className="min-w-0 flex-1">
-                      <p className="whitespace-pre-wrap text-sm text-ink">{note.body}</p>
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs text-muted">
-                          <span title={note.owner}>{labelFor(note.owner)}</span> · created{' '}
-                          {formatDate(note.createdAt)}
-                          {note.updatedAt !== note.createdAt &&
-                            ` · updated ${formatDate(note.updatedAt)}`}
+                      return (
+                        <th
+                          key={column.label || 'actions'}
+                          scope="col"
+                          aria-sort={
+                            isActive ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'
+                          }
+                          // Padding goes on the button for sortable columns so
+                          // the whole cell is the hit target, not just the label.
+                          className={`font-medium ${sortKey ? 'p-0' : 'px-4 py-2.5'} ${
+                            column.align === 'right' ? 'text-right' : 'text-left'
+                          }`}
+                        >
+                          {sortKey ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleSort(sortKey)}
+                              aria-label={`Sort by ${column.label}`}
+                              className={`flex w-full items-center gap-1 px-4 py-2.5 hover:text-ink ${
+                                isActive ? 'text-ink' : ''
+                              }`}
+                            >
+                              {column.label}
+                              <span aria-hidden="true" className="w-2 text-[9px] text-brand-strong">
+                                {isActive ? (direction === 'asc' ? '▲' : '▼') : ''}
+                              </span>
+                            </button>
+                          ) : (
+                            column.label
+                          )}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody className={loading ? 'opacity-60 transition-opacity' : undefined}>
+                  {data.data.map((note) => (
+                    <tr key={note.id} className="border-b border-hairline last:border-0 align-top">
+                      <td className="px-4 py-3">
+                        <Link
+                          to={`/pokemon/${note.pokemonId}`}
+                          className="-m-1 flex items-center gap-2.5 rounded-lg p-1 hover:bg-plane"
+                        >
+                          {note.pokemonSpriteUrl && (
+                            <img
+                              src={note.pokemonSpriteUrl}
+                              alt=""
+                              width={36}
+                              height={36}
+                              loading="lazy"
+                              className="h-9 w-9 shrink-0"
+                            />
+                          )}
+                          <span className="min-w-0">
+                            <span className="flex items-baseline gap-1.5">
+                              <span className="truncate font-medium text-ink">
+                                <Highlight text={note.pokemonName} term={debouncedSearch} />
+                              </span>
+                              <span className="shrink-0 text-[11px] tabular-nums text-muted">
+                                {dexNumber(note.pokemonId)}
+                              </span>
+                            </span>
+                            <span className="mt-1 flex gap-1">
+                              <TypeBadge type={note.pokemonType1} />
+                              {note.pokemonType2 && <TypeBadge type={note.pokemonType2} />}
+                            </span>
+                          </span>
+                        </Link>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <p className="whitespace-pre-wrap text-ink">
+                          <Highlight text={note.body} term={debouncedSearch} />
                         </p>
+                      </td>
+
+                      {/* The identity and timestamp columns stay on one line —
+                          the table already scrolls sideways when it must, and
+                          wrapping a date over three lines just makes tall rows
+                          out of the columns nobody is reading closely. */}
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-muted">
+                        <span title={note.owner}>{labelFor(note.owner)}</span>
+                      </td>
+
+                      <td className="whitespace-nowrap px-4 py-3 text-xs tabular-nums text-muted">
+                        {formatDate(note.createdAt)}
+                      </td>
+
+                      <td className="whitespace-nowrap px-4 py-3 text-xs tabular-nums text-muted">
+                        {/* An unedited note repeats its created date here, which
+                            reads as noise — say so instead. */}
+                        {note.updatedAt === note.createdAt ? (
+                          <span className="text-muted/70">—</span>
+                        ) : (
+                          formatDate(note.updatedAt)
+                        )}
+                      </td>
+
+                      <td className="whitespace-nowrap px-4 py-3 text-right">
                         <NoteActions noteId={note.id} body={note.body} onChanged={refetch} />
-                      </div>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             <Paginator pagination={data.pagination} onChange={setPage} label="note" />
           </>

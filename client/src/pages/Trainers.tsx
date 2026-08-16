@@ -12,7 +12,13 @@ import {
 import { api, toQueryString } from '../lib/api';
 import { useApi, useDebounced, usePageClamp } from '../lib/useApi';
 import { useCurrentUser } from '../lib/useCurrentUser';
-import type { RosterMember, TrainerDashboardResponse, TrainerListItem } from '../lib/types';
+import type {
+  RosterMember,
+  TrainerAnalysis,
+  TrainerDashboardResponse,
+  TrainerListItem,
+} from '../lib/types';
+import { MovesetEditor } from '../components/MovesetEditor';
 import { TrainerForm } from '../components/TrainerForm';
 import { AddRosterMember, EditRosterMember } from '../components/RosterEditor';
 import { EvolutionProgress } from '../components/EvolutionProgress';
@@ -34,9 +40,12 @@ import {
   ACTIVITY_META,
   ROSTER_STATUS_META,
   dexNumber,
+  effectivenessLabel,
   formatDate,
   titleCase,
 } from '../lib/format';
+import { PAGE_CONTAINER } from '../lib/page';
+import { axisProps, tooltipProps } from '../lib/charts';
 
 export function TrainersPage() {
   // The selected trainer lives in the URL so a dashboard can be linked to
@@ -45,10 +54,11 @@ export function TrainersPage() {
   const selectedId = searchParams.get('trainerId');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounced(search);
+  const { scope } = useCurrentUser();
 
   const listPath = useMemo(
-    () => `/api/trainers${toQueryString({ search: debouncedSearch })}`,
-    [debouncedSearch],
+    () => `/api/trainers${toQueryString({ search: debouncedSearch, scope })}`,
+    [debouncedSearch, scope],
   );
   const list = useApi<{ data: TrainerListItem[] }>(listPath);
   const [creating, setCreating] = useState(false);
@@ -59,7 +69,7 @@ export function TrainersPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1300px] px-8 py-7">
+    <div className={PAGE_CONTAINER}>
       <PageHeader
         title="Trainers"
         description="Each trainer carries a roster of Pokémon — the advising analogue of an advisor's caseload. Pick a trainer to open their dashboard."
@@ -157,7 +167,7 @@ export function TrainersPage() {
               key={trainer.id}
               type="button"
               onClick={() => selectTrainer(String(trainer.id))}
-              className="rounded-xl border border-hairline bg-surface p-5 text-left transition-colors hover:border-brand focus:outline-none focus:ring-2 focus:ring-brand"
+              className="flex h-full flex-col rounded-xl border border-hairline bg-surface p-5 text-left transition-colors hover:border-brand focus:outline-none focus:ring-2 focus:ring-brand"
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -172,7 +182,11 @@ export function TrainersPage() {
 
               {trainer.bio && <p className="mt-3 text-xs text-ink-2">{trainer.bio}</p>}
 
-              <dl className="mt-4 grid grid-cols-3 gap-2 border-t border-hairline pt-3 text-center">
+              {/* `mt-auto` pins the stats to the card's foot. Grid rows stretch
+                  cards to a common height, so without it the figures sit
+                  wherever each bio happens to end and never line up across a
+                  row — trainers with no bio float theirs a line higher. */}
+              <dl className="mt-auto grid grid-cols-3 gap-2 border-t border-hairline pt-3 text-center">
                 <div>
                   <dt className="text-[11px] text-muted">Roster</dt>
                   <dd className="text-sm font-semibold tabular-nums text-ink">
@@ -200,21 +214,110 @@ export function TrainersPage() {
   );
 }
 
-const axisProps = {
-  axisLine: false,
-  tickLine: false,
-  stroke: 'var(--color-muted)',
-} as const;
+/**
+ * Team analysis from **equipped** movesets — the card that answers "does this
+ * team actually work".
+ *
+ * Three questions in the order a trainer asks them: is the team set up at all
+ * (readiness), what will beat it (threats), and what can it not answer
+ * (offensive gaps). Threats lead because a shared weakness with no
+ * super-effective reply is the thing that loses a match.
+ */
+function RosterAnalysis({ analysis }: { analysis: TrainerAnalysis }) {
+  const { readiness, threats, offense, gaps } = analysis;
+  const unset = readiness.withoutMoveset + readiness.withPartialMoveset;
 
-const tooltipProps = {
-  cursor: { fill: 'var(--color-plane)' },
-  contentStyle: {
-    borderRadius: 8,
-    border: '1px solid var(--color-hairline)',
-    backgroundColor: 'var(--color-surface)',
-    fontSize: 12,
-  },
-} as const;
+  return (
+    <Card
+      title="Team analysis"
+      subtitle="Computed from the moves each member actually carries, not everything it could learn"
+    >
+      {readiness.activeMembers === 0 ? (
+        <EmptyState
+          title="No active roster"
+          description="Add Pokémon to this trainer's roster to see how the team holds up."
+        />
+      ) : (
+        <div className="space-y-5">
+          {/* Readiness first: every figure below is only as true as the
+              movesets behind it, so an incomplete team says so up front. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatTile label="Active members" value={readiness.activeMembers} />
+            <StatTile label="Full movesets" value={`${readiness.withFullMoveset}/${readiness.activeMembers}`} />
+            <StatTile label="Types answered" value={`${18 - gaps.length}/18`} hint="super-effectively" />
+            <StatTile label="Open threats" value={threats.length} />
+          </div>
+
+          {unset > 0 && (
+            <p className="rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs text-ink">
+              {unset} of {readiness.activeMembers} members {unset === 1 ? 'has' : 'have'} an
+              incomplete moveset. Coverage below counts only the moves that are set, so it will
+              understate this team until they are filled in.
+            </p>
+          )}
+
+          <div>
+            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">
+              Threats — hits two or more members hard, with no super-effective reply
+            </h3>
+            {threats.length === 0 ? (
+              <p className="text-sm text-muted">
+                No shared weakness goes unanswered. Every type that hits several members hard has
+                a super-effective reply somewhere on the team.
+              </p>
+            ) : (
+              <ul className="space-y-1.5">
+                {threats.map((threat) => (
+                  <li key={threat.type} className="flex flex-wrap items-center gap-2 text-sm">
+                    <TypeBadge type={threat.type} />
+                    <span className="text-ink">hits {threat.weakCount}</span>
+                    <span className="text-muted">{threat.weakMembers.join(', ')}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div>
+            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">
+              Attacking coverage
+            </h3>
+            <ul className="flex flex-wrap gap-1.5">
+              {offense.map((entry) => {
+                const superEffective = entry.bestMultiplier > 100;
+                const noAnswer = entry.bestMultiplier === 0;
+                return (
+                  <li
+                    key={entry.type}
+                    className={`flex items-center gap-1 rounded-md border px-1.5 py-1 ${
+                      superEffective
+                        ? 'border-status-good/40 bg-status-good/10'
+                        : noAnswer
+                          ? 'border-status-critical/40 bg-status-critical/10'
+                          : 'border-hairline'
+                    }`}
+                    title={
+                      superEffective
+                        ? `${entry.members.join(', ')} hit this for ${effectivenessLabel(entry.bestMultiplier)}`
+                        : noAnswer
+                          ? 'Nothing on this team can damage this type'
+                          : 'No super-effective answer — neutral damage at best'
+                    }
+                  >
+                    <TypeBadge type={entry.type} />
+                    <span className="text-[11px] tabular-nums text-muted">
+                      {effectivenessLabel(entry.bestMultiplier)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 function TrainerDashboard({
   trainerId,
@@ -237,14 +340,23 @@ function TrainerDashboard({
   );
   usePageClamp(data?.notesPagination, setNotesPage);
   usePageClamp(data?.activityPagination, setActivityPage);
+
+  // Team analysis is its own request: the dashboard payload above already runs
+  // 15+ queries, and saving a moveset refetches this without re-paging the
+  // note and activity histories underneath it.
+  const { data: analysis, refetch: refetchAnalysis } = useApi<TrainerAnalysis>(
+    `/api/trainers/${trainerId}/analysis`,
+  );
+
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [editingMember, setEditingMember] = useState<RosterMember | null>(null);
+  const [editingMoveset, setEditingMoveset] = useState<RosterMember | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [rosterView, setRosterView] = useState<'table' | 'board'>('table');
   // The two history tables show raw `owner` emails otherwise.
-  const { labelFor } = useCurrentUser();
+  const { labelFor, email: actingEmail } = useCurrentUser();
 
   if (loading && !data) return <Loading label="Loading roster…" />;
   if (error) return <ErrorState message={error} onRetry={refetch} />;
@@ -261,6 +373,13 @@ function TrainerDashboard({
     notes,
     activity,
   } = data;
+
+  /*
+   * Ownership is a convention enforced by the API (403 on a foreign trainer),
+   * so the UI mirrors it rather than duplicating it: every write control below
+   * is disabled when this trainer belongs to someone else.
+   */
+  const isMine = trainer.owner === actingEmail;
 
   const typeData = typeBreakdown.map((row) => ({ ...row, type: titleCase(row.type) }));
   const eligible = roster.filter((m) => m.milestoneEligible);
@@ -316,6 +435,11 @@ function TrainerDashboard({
               {trainer.email && ` · ${trainer.email}`}
             </p>
             {trainer.bio && <p className="mt-2 max-w-2xl text-sm text-ink-2">{trainer.bio}</p>}
+            {!isMine && (
+              <p className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-hairline bg-plane px-2 py-1 text-xs text-muted">
+                Managed by {labelFor(trainer.owner)} — read only. Switch to them to make changes.
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <Link
@@ -324,10 +448,15 @@ function TrainerDashboard({
             >
               Open roster in Lookup →
             </Link>
-            <Button onClick={() => setEditing(true)} disabled={busy}>
+            {/*
+              Under "All trainers" you can open someone else's roster. Every
+              write would 403, so the controls are disabled and say why rather
+              than failing on click.
+            */}
+            <Button onClick={() => setEditing(true)} disabled={busy || !isMine}>
               Edit
             </Button>
-            <Button variant="danger" onClick={deleteTrainer} disabled={busy}>
+            <Button variant="danger" onClick={deleteTrainer} disabled={busy || !isMine}>
               Delete
             </Button>
           </div>
@@ -377,6 +506,21 @@ function TrainerDashboard({
           onTrainerChanged();
         }}
       />
+
+      {editingMoveset && (
+        <MovesetEditor
+          open
+          rosterId={editingMoveset.id}
+          pokemonId={editingMoveset.pokemonId}
+          memberName={editingMoveset.nickname ?? editingMoveset.displayName}
+          onClose={() => setEditingMoveset(null)}
+          onSaved={() => {
+            setEditingMoveset(null);
+            refetch();
+            refetchAnalysis();
+          }}
+        />
+      )}
 
       {/*
         Roster size counts everyone; every other tile is computed over the
@@ -443,7 +587,7 @@ function TrainerDashboard({
             title="This trainer has an empty roster"
             description="No Pokémon are assigned yet, so there are no stats to show."
             action={
-              <Button variant="primary" onClick={() => setAdding(true)}>
+              <Button variant="primary" onClick={() => setAdding(true)} disabled={!isMine}>
                 + Add the first Pokémon
               </Button>
             }
@@ -476,7 +620,7 @@ function TrainerDashboard({
                     </button>
                   ))}
                 </div>
-                <Button variant="primary" onClick={() => setAdding(true)} disabled={busy}>
+                <Button variant="primary" onClick={() => setAdding(true)} disabled={busy || !isMine}>
                   + Add Pokémon
                 </Button>
               </div>
@@ -489,6 +633,7 @@ function TrainerDashboard({
                   refetch();
                   onTrainerChanged();
                 }}
+                onEditMoveset={setEditingMoveset}
               />
             ) : (
             <div className="overflow-x-auto">
@@ -514,7 +659,7 @@ function TrainerDashboard({
                       BST
                     </th>
                     <th scope="col" className="px-2 py-2 text-right font-medium">
-                      Moves
+                      Moveset
                     </th>
                     <th scope="col" className="px-2 py-2 text-left font-medium">
                       Progress
@@ -583,15 +728,30 @@ function TrainerDashboard({
                         <td className="px-2 py-2 text-right font-medium tabular-nums text-ink">
                           {member.baseStatTotal}
                         </td>
+                        {/* The equipped moveset leads; the learnable movepool
+                            is the secondary figure. A member that *can* learn
+                            131 moves but carries none contributes nothing to
+                            the team, and the old column said the opposite. */}
                         <td className="px-2 py-2 text-right tabular-nums">
-                          <span className="text-ink">{member.moveCount}</span>
-                          {/* Coverage beside the raw count: a wide movepool
-                              that only attacks with two types is not wide. */}
-                          <span
-                            className="block text-[11px] text-muted"
-                            title="Types this member can attack with"
+                          <button
+                            type="button"
+                            onClick={() => setEditingMoveset(member)}
+                            disabled={busy || !isMine}
+                            className={`font-medium hover:text-brand disabled:opacity-50 ${
+                              member.movesetSize === 0 ? 'text-status-critical' : 'text-ink'
+                            }`}
+                            title={
+                              member.movesetSize === 0
+                                ? 'No moves set — set a moveset'
+                                : 'Edit this moveset'
+                            }
                           >
-                            {member.coverageCount}/18 types
+                            {member.movesetSize}/4
+                          </button>
+                          <span className="block text-[11px] text-muted">
+                            {member.movesetSize === 0
+                              ? `${member.moveCount} learnable`
+                              : `${member.movesetCoverage} type${member.movesetCoverage === 1 ? '' : 's'}`}
                           </span>
                         </td>
                         <td className="px-2 py-2">
@@ -612,18 +772,30 @@ function TrainerDashboard({
                           </div>
                         </td>
                         <td className="px-2 py-2 text-right whitespace-nowrap">
+                          {/* Named alongside Edit and Remove rather than left
+                              to the Moveset number, which reads as a status
+                              and only looks clickable on hover. */}
+                          <button
+                            type="button"
+                            onClick={() => setEditingMoveset(member)}
+                            disabled={busy || !isMine}
+                            aria-label={`Edit moveset for ${member.nickname ?? member.displayName}`}
+                            className="text-xs text-muted hover:text-brand disabled:opacity-50"
+                          >
+                            Moves
+                          </button>
                           <button
                             type="button"
                             onClick={() => setEditingMember(member)}
-                            disabled={busy}
-                            className="text-xs text-muted hover:text-brand disabled:opacity-50"
+                            disabled={busy || !isMine}
+                            className="ml-3 text-xs text-muted hover:text-brand disabled:opacity-50"
                           >
                             Edit
                           </button>
                           <button
                             type="button"
                             onClick={() => removeMember(member)}
-                            disabled={busy}
+                            disabled={busy || !isMine}
                             className="ml-3 text-xs text-muted hover:text-status-critical disabled:opacity-50"
                           >
                             Remove
@@ -637,6 +809,8 @@ function TrainerDashboard({
             </div>
             )}
           </Card>
+
+          {analysis && <RosterAnalysis analysis={analysis} />}
 
           {/* ---- Roster charts ---- */}
           <div className="grid gap-5 lg:grid-cols-2">
@@ -655,13 +829,15 @@ function TrainerDashboard({
             </Card>
 
             {/*
-              The type breakdown above says what the roster IS; this says what
-              it can HIT. Every one of the 18 types is plotted, so a bar at zero
-              is a gap the trainer has no answer to.
+              POTENTIAL, not equipped — this counts the whole learnable
+              movepool, so a member that can learn 131 moves reads as covering
+              14 types whether or not it carries any of them. The team analysis
+              card above is the one that answers "does this team work"; this is
+              the ceiling it could reach if every moveset were rebuilt.
             */}
             <Card
-              title="Movepool coverage"
-              subtitle="Active roster members that can attack with each type — status moves excluded"
+              title="Movepool coverage (potential)"
+              subtitle="Types the active roster could attack with if movesets were rebuilt — the whole learnable movepool, status moves excluded"
               className="lg:col-span-2"
               actions={
                 <Link

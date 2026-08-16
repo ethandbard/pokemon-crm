@@ -31,33 +31,8 @@ import {
 } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
 import { ACTIVITY_META, slugLabel, titleCase } from '../lib/format';
-
-/*
- * Charting conventions (see CLAUDE.md § Charting):
- *  - Single-series charts use --color-series-1 and carry no legend; the card
- *    title names the measure.
- *  - Multi-series charts get a legend, and never a second y-axis: two measures
- *    on different scales become two charts.
- *  - Grid and axes are recessive; marks are thin with rounded data-ends.
- */
-const SERIES_1 = 'var(--color-series-1)';
-const SERIES_2 = 'var(--color-series-2)';
-
-const axisProps = {
-  axisLine: false,
-  tickLine: false,
-  stroke: 'var(--color-muted)',
-} as const;
-
-const tooltipProps = {
-  cursor: { fill: 'var(--color-plane)' },
-  contentStyle: {
-    borderRadius: 8,
-    border: '1px solid var(--color-hairline)',
-    backgroundColor: 'var(--color-surface)',
-    fontSize: 12,
-  },
-} as const;
+import { PAGE_CONTAINER } from '../lib/page';
+import { SERIES_1, SERIES_2, axisProps, tooltipProps } from '../lib/charts';
 
 /** BST bands offered as a coarse "how strong" filter. */
 const BST_BANDS = [
@@ -269,7 +244,7 @@ export function DashboardPage() {
 
   if (loading && !data) {
     return (
-      <div className="mx-auto max-w-[1400px] px-8 py-7">
+      <div className={PAGE_CONTAINER}>
         <Loading label="Crunching the dataset…" />
       </div>
     );
@@ -277,7 +252,7 @@ export function DashboardPage() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-[1400px] px-8 py-7">
+      <div className={PAGE_CONTAINER}>
         <ErrorState message={error} onRetry={refetch} />
       </div>
     );
@@ -285,7 +260,7 @@ export function DashboardPage() {
 
   if (!data?.summary || data.summary.total === 0) {
     return (
-      <div className="mx-auto max-w-[1400px] px-8 py-7">
+      <div className={PAGE_CONTAINER}>
         <PageHeader title="Performance Dashboard" />
         {filterBar}
         <div className="rounded-xl border border-hairline bg-surface">
@@ -311,7 +286,7 @@ export function DashboardPage() {
   const { summary, crm } = data;
 
   return (
-    <div className="mx-auto max-w-[1400px] px-8 py-7">
+    <div className={PAGE_CONTAINER}>
       <PageHeader
         title="Performance Dashboard"
         description={

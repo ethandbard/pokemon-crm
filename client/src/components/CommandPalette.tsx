@@ -5,6 +5,7 @@ import { useApi, useDebounced } from '../lib/useApi';
 import type { MovesResponse, PokemonListResponse, TrainerListItem } from '../lib/types';
 import { dexNumber } from '../lib/format';
 import { useHotkey } from './Toast';
+import { useCurrentUser } from '../lib/useCurrentUser';
 
 interface Command {
   id: string;
@@ -21,10 +22,12 @@ const PAGES: Command[] = [
   { id: 'page-lookup', label: 'Pokémon Lookup', group: 'Pages', icon: '⌕', to: '/lookup' },
   { id: 'page-moves', label: 'Moves', group: 'Pages', icon: '⚔', to: '/moves' },
   { id: 'page-trainers', label: 'Trainers', group: 'Pages', icon: '☰', to: '/trainers' },
+  { id: 'page-team', label: 'Team Dashboard', group: 'Pages', icon: '◈', to: '/team' },
   { id: 'page-dashboard', label: 'Performance Dashboard', group: 'Pages', icon: '▤', to: '/dashboard' },
   { id: 'page-notes', label: 'Notes', group: 'Pages', icon: '✎', to: '/notes' },
   { id: 'page-activity', label: 'Activity', group: 'Pages', icon: '⚡', to: '/activity' },
   { id: 'page-tableau', label: 'Tableau Dashboard', group: 'Pages', icon: '▦', to: '/tableau' },
+  { id: 'page-admin', label: 'Admin', group: 'Pages', icon: '⚙', to: '/admin' },
 ];
 
 const isPaletteHotkey = (event: KeyboardEvent) =>
@@ -44,6 +47,7 @@ export function CommandPalette() {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const navigate = useNavigate();
+  const { scope } = useCurrentUser();
 
   useHotkey(isPaletteHotkey, () => setOpen((current) => !current));
 
@@ -56,7 +60,11 @@ export function CommandPalette() {
     ? `/api/pokemon${toQueryString({ search: trimmed, pageSize: 6 })}`
     : null;
   const movePath = trimmed ? `/api/moves${toQueryString({ search: trimmed, pageSize: 5 })}` : null;
-  const trainerPath = trimmed ? `/api/trainers${toQueryString({ search: trimmed })}` : null;
+  // Jumping to a trainer you cannot edit is a dead end, so the palette follows
+  // the same scope as every other trainer surface.
+  const trainerPath = trimmed
+    ? `/api/trainers${toQueryString({ search: trimmed, scope })}`
+    : null;
 
   const pokemonResults = useApi<PokemonListResponse>(pokemonPath);
   const moveResults = useApi<MovesResponse>(movePath);

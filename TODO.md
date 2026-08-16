@@ -1,6 +1,8 @@
 # TODO
 
-Items 1, 2, 3a, 3c, 4, 5 and 6 are done. 3b is the live backlog.
+Items 1, 2, 3a, 3c, 4, 5 and 6 are done. **Item 7 — the roster-building pivot —
+is complete** — all four phases landed. 3b's remaining bullets (varieties,
+encounters, abilities) are the next unclaimed work.
 
 ---
 
@@ -8,9 +10,11 @@ Items 1, 2, 3a, 3c, 4, 5 and 6 are done. 3b is the live backlog.
 
 `server/src/attention.ts` (scorer) + `routes/attention.ts` +
 `components/AttentionQueue.tsx`. Surfaced workspace-wide on Home and per-trainer
-on the Trainers dashboard. Five signals: never reviewed, stale review, flagged,
-milestone overdue, behind pace. Weights and the seeding dependencies are
-documented in CLAUDE.md § Needs-attention scoring.
+on the Trainers dashboard.
+
+**The signals were replaced in 7c** — see there. The queue is now moveset
+readiness plus review hygiene, with a separate trainer-level alert list. Weights
+and constraints live in CLAUDE.md § Needs-attention scoring.
 
 ## ✅ 2. Interactivity layer — DONE
 
@@ -59,12 +63,16 @@ HTTP, so it moved to 3b.
   (~250). Their dex ids are in the 10000s. Needs a decision on whether a form is
   a row in `pokemon` or a new `pokemon_forms` table; a form sharing a dex number
   with its base would break the primary key.
-- **`/type/{name}` — 18 requests, the biggest single unlock.**
-  `damage_relations` is the full effectiveness matrix: defensive weaknesses per
-  Pokémon, coverage gaps per roster. Compute effectiveness server-side from a
-  `type_damage` table; don't ship the matrix to the client. Upgrades 3c's
-  coverage report from "which types can this roster hit with" to "can it cover
-  what it is weak to".
+- **✅ `/type/{name}` — DONE (the matrix and the Pokémon-level surface).**
+  Migration `0007_abnormal_gideon.sql` adds `type_damage` (324 rows);
+  `seed:types` imports it in 18 requests, and `seed` runs it as a pass.
+  `server/src/effectiveness.ts` computes defensive matchups server-side — the
+  matrix is not shipped to the client — and `/api/pokemon/:id` returns them as
+  `matchups`, rendered as a Type matchups card on the Profile.
+
+  **The roster-level half landed with item 7 phase 1** — and turned out to need
+  movesets first. Answering "can it cover what it is weak to" from the
+  *learnable* movepool would have said yes for nearly every roster.
 - **`/pokemon/{id}/encounters`** — 1,025 requests, tiny responses. Location,
   method, and rarity per game version; backs a "where does this come from" panel.
 - **`/ability/{name}`** — ~370 requests. Effect text so abilities render as prose
@@ -88,7 +96,8 @@ CLAUDE.md § `moves` and `pokemon_moves`:
 - `power: 0` is not `power: null`, and neither means zero damage.
 - Coverage must exclude status moves.
 
-"Can a roster cover its own weaknesses" still needs 3b's `/type/{name}`.
+"Can a roster cover its own weaknesses" now has its data — see 3b's
+`/type/{name}`, which landed the matrix but not yet the roster-level report.
 
 ### 3d. Completionist
 
@@ -135,6 +144,118 @@ Still open:
 
 ---
 
+## 7. Roster building as the product
+
+The pivot: make building and evaluating a roster the point, and the analysis
+honest. Plan agreed in four phases; **phase 1 is done**.
+
+### ✅ 7a. Movesets and honest coverage — DONE
+
+Migration `0008_flat_nocturne.sql` adds `roster_moves` (four slots per entry).
+`PUT /api/roster/:id/moves` replaces a whole moveset and **rejects moves the
+species cannot learn** — the rule the whole feature rests on.
+`GET /api/trainers/:id/analysis` returns offence, defence, gaps, threats and
+readiness, computed in `effectiveness.ts` from equipped moves only. Surfaced as
+the Team analysis card and a Moveset column on the trainer dashboard; the old
+coverage card is relabelled "(potential)".
+
+The constraint worth not reintroducing is recorded in CLAUDE.md § Roster
+analysis: **equipped is `roster_moves`, learnable is `pokemon_moves`**, and a
+team-strength figure that reads the latter is a ceiling wearing the wrong label.
+
+### ✅ 7b. Team-leader dashboard — DONE
+
+`/team` (`pages/Team.tsx`), trainer-scoped via `?trainerId=`, reading the
+analysis endpoint: readiness tiles, open threats, attacking coverage and
+defensive exposure charts, coverage detail, and per-member moveset completeness.
+The dex-wide `/dashboard` is untouched.
+
+Both cleanups landed with it:
+
+- `axisProps` / `tooltipProps` extracted to `lib/charts.ts`, which is now the
+  one place chart chrome is defined.
+- `statAverages` on the trainer dashboard averaged **retired** members despite
+  its "Averaged across this roster" subtitle. It was six `union all` arms each
+  repeating the join and filter, and the filter was missing from all six;
+  rewritten as one scan plus a lateral `VALUES` unpivot, so there is now exactly
+  one place that filter could be wrong.
+
+`offense[].answeredBy` was added server-side rather than deriving it on the
+client — `members.length` ties on the best result even when neutral, so "how
+many can answer this" needed to mean one thing.
+
+### ✅ 7c. Attention rework — DONE
+
+`behind_pace` is gone, and `expPerDay` with it — the queue no longer reports a
+simulation as a finding. `flagged` and `milestone_overdue` went too.
+`moveset_missing` and `moveset_incomplete` are the new member signals, and
+`getRosterAlerts()` is a **separate trainer-level list** (roster below six,
+unanswered shared weakness), because a roster alert has no member to hang on.
+
+Two things found while building it:
+
+- **Alerts had to cap on the workspace-wide view.** Ten rosters produce ~38
+  alerts, which buried a member queue capped at 8. Scoped to one trainer they
+  all ship — Brock's six unanswered weaknesses are each real — so only the
+  unscoped view caps, and it returns `alertsTotal` with it.
+- Weaknesses sort worst-first so a capped view keeps the worst.
+
+⚠️ Dropping `flagged` removed the only manual escalation path into the queue.
+Reversible in four lines of `scoreFacts`.
+
+Nothing reads `growth_rates` (600 rows) any more; the table stays seeded.
+Evolution readiness survives as the trainer dashboard's "Ready to evolve" card —
+it is no longer an alert, which is the distinction.
+
+### ✅ 7d. Trainer ownership — DONE
+
+Migration `0009_narrow_jack_murdock.sql` adds `trainers.owner`. Reads take
+`?scope=mine|all` (default `mine`); writes to a trainer you don't own return
+403 from `assertOwned` / `assertOwnsTrainer`, and a transfer must clear both
+ends. The predicate lives once in `owner.ts` as `trainerScope` /
+`trainerScopeSql`. Full rules in CLAUDE.md § Trainer ownership.
+
+Three findings worth keeping:
+
+- **`stats.ts` never referenced trainers**, so the dex-wide dashboard needed no
+  scoping at all — the plan over-listed it.
+- **`db/schema.ts` cannot import `constants.ts`** — drizzle-kit loads it as CJS
+  and fails on the ESM path, the same trap already documented for
+  `drizzle.config.ts`. `DEFAULT_OWNER` is repeated as a literal there.
+- **The scope toggle had to be a query param, not a header** like
+  `X-Acting-User`. `useApi` keys off the path, so a header would have changed
+  nothing on screen until an unrelated refetch.
+
+Under "All trainers" you can open someone else's roster, so every write control
+is disabled with a banner naming the owner — showing buttons that can only 403
+is the dead-end this app keeps having to design out.
+
+With no auth this is a convention, not a guarantee: switching users grants you
+their trainers, and the switcher says so.
+
+### ✅ 7e. Admin page — DONE
+
+`/admin` (`pages/Admin.tsx`, `routes/admin.ts`), covering the gap that trainer
+ownership could be *set* at creation but never *changed*.
+
+Four sections: data health (reference-table completeness, so a partial seed
+stops presenting as unexplained empty pages), trainer owner reassignment, user
+edit/delete — **both endpoints already existed with no UI**, so users could be
+created but never renamed or removed — and orphaned-attribution repair.
+
+Deliberately ungated; the page says so. Rules in CLAUDE.md § The admin page.
+
+Verified by deleting a user who owned two trainers: the orphan panel picked up
+2 trainers / 1 note / 3 flags, and reassigning moved 2 trainers, 1 note and
+**2** flags — the third was dropped as a duplicate, because the destination
+already carried that same `(pokemon, kind)` flag.
+
+Not built, and argued against: making the `ATTENTION` weights editable. They
+are documented compile-time constants; moving them to runtime needs a settings
+table and turns a legible model into mutable state.
+
+---
+
 ## Known gaps (not yet scheduled)
 
 - **No tests.** CI runs typecheck, build, and a migrations smoke test
@@ -142,13 +263,17 @@ Still open:
   first suite: the aggregation endpoints (`/api/stats/dashboard`,
   `/api/trainers/:id`, `/api/attention`, `/api/moves/:id`) asserted against a
   known seeded fixture.
-- **No authentication.** The `users` table and "acting as" switcher (item 6
-  below) attribute writes but verify nothing — the acting user is a header the
-  client sets. Real auth means sessions and a check in `ownerFor`.
+- **No authentication.** The `users` table and "acting as" switcher attribute
+  writes but verify nothing — the acting user is a header the client sets. Real
+  auth means sessions and a check in `ownerFor`. **Item 7d now leans on this**:
+  trainer ownership scopes reads and 403s writes, which is real behaviour built
+  on an unverified claim. Auth is the one gap that turns a convention into a
+  guarantee.
 - **Single ~720 kB JS chunk.** Route-level `React.lazy` would split Recharts out
   of the pages that don't chart.
 - **No dark mode.** Tokens are centralised in `index.css` if it comes back.
 - **The needs-attention model ignores movepools.** A thin movepool or an
   uncovered weakness is arguably an alert; it is a sixth signal plus a weight in
-  `ATTENTION`, and should wait for 3b's type chart so the signal can be about
-  coverage rather than raw move count.
+  `ATTENTION`. The type chart it was waiting on now exists (3b), so the signal
+  can be about coverage rather than raw move count — but it should follow the
+  roster-level coverage report rather than lead it.

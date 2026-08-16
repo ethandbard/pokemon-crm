@@ -42,7 +42,16 @@ export const env = {
   databaseUrl: process.env.DATABASE_URL || connectionStringFromParts(),
   /** Azure Postgres requires TLS; local dev servers usually do not. */
   dbSsl: (process.env.PGSSL ?? 'false').toLowerCase() === 'true',
-  port: int('PORT', 4000),
+  /**
+   * `API_PORT` wins over `PORT` so the API keeps its own port when something
+   * else in the environment already owns `PORT`. Dev harnesses that assign the
+   * web server a free port export `PORT` to do it, and because dotenv never
+   * overrides a variable that is already set, the API would inherit the web
+   * port, bind there, and leave nothing on :4000 for the Vite proxy to reach.
+   * Production platforms that hand the process a `PORT` still work: leave
+   * API_PORT unset there.
+   */
+  port: int('API_PORT', int('PORT', 4000)),
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   seedLimit: int('SEED_LIMIT', 1025),
   seedConcurrency: int('SEED_CONCURRENCY', 8),

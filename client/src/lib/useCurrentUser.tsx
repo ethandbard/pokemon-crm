@@ -3,17 +3,23 @@ import { api, setActingUser } from './api';
 import type { User, UsersResponse } from './types';
 
 /**
- * Who the app is acting as.
+ * Who the app is acting as, and whose trainers it shows.
  *
  * **Attribution, not authentication.** Picking a user changes whose name goes
- * on new notes and status flags and what "mine" means in the filters; it grants
- * nothing and hides nothing. Everyone still sees the whole workspace.
+ * on new notes and flags, which trainers are listed, and what may be edited —
+ * but it grants nothing, because nothing verifies the choice. Switching to
+ * another user hands you their trainers. Notes and activity stay
+ * workspace-visible for everyone.
  *
  * The choice is an email in localStorage, deliberately the same value that
  * lands in the `owner` columns — so a selection survives a reload even if that
  * user is later removed from the directory.
  */
 const STORAGE_KEY = 'pokemon-crm:acting-user';
+const SCOPE_KEY = 'pokemon-crm:trainer-scope';
+
+/** `mine` lists only the acting user's trainers; `all` lists everyone's. */
+export type TrainerScope = 'mine' | 'all';
 
 function storedEmail(): string | null {
   try {
@@ -21,6 +27,14 @@ function storedEmail(): string | null {
   } catch {
     // Private-mode or blocked storage — the switcher still works per session.
     return null;
+  }
+}
+
+function storedScope(): TrainerScope {
+  try {
+    return window.localStorage.getItem(SCOPE_KEY) === 'all' ? 'all' : 'mine';
+  } catch {
+    return 'mine';
   }
 }
 
@@ -38,6 +52,13 @@ interface CurrentUserValue {
   loading: boolean;
   error: string | null;
   switchTo: (email: string) => void;
+  /**
+   * Whose trainers the trainer-aware surfaces show. Passed as `?scope=` rather
+   * than a header so changing it changes each request's URL, which is what
+   * makes `useApi` refetch.
+   */
+  scope: TrainerScope;
+  setScope: (scope: TrainerScope) => void;
   /** Re-reads the directory — call after creating or deleting a user. */
   refresh: () => Promise<void>;
   /** Display name for any `owner` string, falling back to the email itself. */
@@ -49,6 +70,7 @@ const CurrentUserContext = createContext<CurrentUserValue | null>(null);
 export function CurrentUserProvider({ children }: { children: React.ReactNode }) {
   const [users, setUsers] = useState<User[]>([]);
   const [email, setEmail] = useState<string | null>(() => storedEmail());
+  const [scope, setScope] = useState<TrainerScope>(() => storedScope());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -85,6 +107,14 @@ export function CurrentUserProvider({ children }: { children: React.ReactNode })
     }
   }, [email]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SCOPE_KEY, scope);
+    } catch {
+      // Storage unavailable — the in-memory choice is still honoured.
+    }
+  }, [scope]);
+
   const value = useMemo<CurrentUserValue>(() => {
     const byEmail = new Map(users.map((u) => [u.email, u]));
     return {
@@ -94,10 +124,12 @@ export function CurrentUserProvider({ children }: { children: React.ReactNode })
       error,
       user: email ? (byEmail.get(email) ?? null) : null,
       switchTo: setEmail,
+      scope,
+      setScope,
       refresh: load,
       labelFor: (owner: string) => byEmail.get(owner)?.name ?? owner,
     };
-  }, [users, email, loading, error, load]);
+  }, [users, email, scope, loading, error, load]);
 
   return <CurrentUserContext.Provider value={value}>{children}</CurrentUserContext.Provider>;
 }

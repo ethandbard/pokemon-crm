@@ -2,9 +2,20 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { activity, moves, notes, pokemon, pokemonMoves, roster, trainers } from '../db/schema.js';
-import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
+import {
+  activity,
+  moves,
+  notes,
+  pokemon,
+  pokemonMoves,
+  roster,
+  rosterMoves,
+  trainers,
+} from '../db/schema.js';
+import { asyncHandler, badRequest, forbidden, notFound, paginationFor } from '../http.js';
+import { ownerFor, scopeSchema, trainerScope } from '../owner.js';
 import { POKEMON_TYPES } from '../constants.js';
+import { loadTypeChart, offensiveCoverage, rosterVulnerabilities } from '../effectiveness.js';
 
 export const trainersRouter = Router();
 
@@ -18,11 +29,13 @@ export const trainersRouter = Router();
 trainersRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const { search } = z
-      .object({ search: z.string().trim().max(100).optional() })
+    const { search, scope } = z
+      .object({ search: z.string().trim().max(100).optional(), scope: scopeSchema })
       .parse(req.query);
 
     const filters: SQL[] = [];
+    const scoped = trainerScope(req, scope);
+    if (scoped) filters.push(scoped);
     if (search) {
       const pattern = `%${search}%`;
       const clause = or(
@@ -40,6 +53,7 @@ trainersRouter.get(
         region: trainers.region,
         specialty: trainers.specialty,
         email: trainers.email,
+        owner: trainers.owner,
         bio: trainers.bio,
         // Outer reference qualified as `${trainers}.id` — see the note in
         // routes/pokemon.ts on why the bare form is unsafe here.
@@ -79,6 +93,28 @@ const trainerBodySchema = z.object({
   bio: optionalText(1000),
 });
 
+/**
+ * Loads a trainer and refuses if the acting user does not own it.
+ *
+ * Every write that touches a trainer or one of its roster entries goes through
+ * here, so the rule lives in one place. Reads deliberately do not: a trainer is
+ * still *visible* under `scope=all`, and hiding what you can already see would
+ * make the switcher look broken.
+ */
+async function assertOwned(req: Parameters<typeof ownerFor>[0], trainerId: number) {
+  const [trainer] = await db
+    .select({ id: trainers.id, name: trainers.name, owner: trainers.owner })
+    .from(trainers)
+    .where(eq(trainers.id, trainerId))
+    .limit(1);
+
+  if (!trainer) throw notFound(`No trainer with id ${trainerId}`);
+  if (trainer.owner !== ownerFor(req)) {
+    throw forbidden(`${trainer.name} belongs to another user — switch to them to make changes`);
+  }
+  return trainer;
+}
+
 /** POST /api/trainers — create a trainer. */
 trainersRouter.post(
   '/',
@@ -94,7 +130,11 @@ trainersRouter.post(
     // 500 into a message the form can show against the name field.
     if (existing) throw badRequest(`A trainer named “${input.name}” already exists`);
 
-    const [created] = await db.insert(trainers).values(input).returning();
+    // A new trainer belongs to whoever created it.
+    const [created] = await db
+      .insert(trainers)
+      .values({ ...input, owner: ownerFor(req) })
+      .returning();
     res.status(201).json(created);
   }),
 );
@@ -105,6 +145,7 @@ trainersRouter.patch(
   asyncHandler(async (req, res) => {
     const { id } = idParamSchema.parse(req.params);
     const input = trainerBodySchema.parse(req.body);
+    await assertOwned(req, id);
 
     const [clash] = await db
       .select({ id: trainers.id })
@@ -129,6 +170,8 @@ trainersRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const { id } = idParamSchema.parse(req.params);
+    await assertOwned(req, id);
+
     const [deleted] = await db
       .delete(trainers)
       .where(eq(trainers.id, id))
@@ -153,12 +196,9 @@ trainersRouter.post(
       .object({ pokemonIds: z.array(z.number().int().min(1)).min(1).max(200) })
       .parse(req.body);
 
-    const [trainer] = await db
-      .select({ id: trainers.id })
-      .from(trainers)
-      .where(eq(trainers.id, id))
-      .limit(1);
-    if (!trainer) throw notFound(`No trainer with id ${id}`);
+    // Bulk-add is reached from Lookup's action bar, whose trainer dropdown is a
+    // write target — the guard matters more here than anywhere.
+    await assertOwned(req, id);
 
     const valid = await db
       .select({ id: pokemon.id })
@@ -202,13 +242,7 @@ trainersRouter.post(
   asyncHandler(async (req, res) => {
     const { id } = idParamSchema.parse(req.params);
     const input = rosterBodySchema.parse(req.body);
-
-    const [trainer] = await db
-      .select({ id: trainers.id })
-      .from(trainers)
-      .where(eq(trainers.id, id))
-      .limit(1);
-    if (!trainer) throw notFound(`No trainer with id ${id}`);
+    await assertOwned(req, id);
 
     const [target] = await db
       .select({ id: pokemon.id, displayName: pokemon.displayName })
@@ -358,10 +392,29 @@ trainersRouter.get(
               join ${moves} m on m.id = pm.move_id
               where pm.pokemon_id = ${roster}.pokemon_id and m.damage_class <> 'status'
             )`,
+            /*
+             * Slots filled, out of four. This is the *equipped* moveset, and
+             * it is keyed on the roster entry rather than the species — two
+             * trainers carrying the same Pokémon run different movesets.
+             */
+            movesetSize: sql<number>`(select count(*)::int from ${rosterMoves} rm where rm.roster_id = ${roster}.id)`,
+            /** Attacking types those equipped moves actually reach. */
+            movesetCoverage: sql<number>`(
+              select count(distinct m.type)::int
+              from ${rosterMoves} rm
+              join ${moves} m on m.id = rm.move_id
+              where rm.roster_id = ${roster}.id and m.damage_class <> 'status'
+            )`,
             noteCount: sql<number>`(select count(*)::int from ${notes} n where n.pokemon_id = ${roster}.pokemon_id)`,
+            /*
+             * DISTINCT matters: a flag is keyed on (pokemon, owner, kind), so
+             * a Pokémon reviewed by three users has three `reviewed` rows.
+             * Without it this column repeats the kind, which renders duplicate
+             * icons and hands React duplicate keys for the same list.
+             */
             activityKinds: sql<
               string[]
-            >`coalesce((select array_agg(a.kind::text order by a.kind::text) from ${activity} a where a.pokemon_id = ${roster}.pokemon_id), '{}')`,
+            >`coalesce((select array_agg(distinct a.kind::text) from ${activity} a where a.pokemon_id = ${roster}.pokemon_id), '{}')`,
           })
           .from(roster)
           .innerJoin(pokemon, eq(roster.pokemonId, pokemon.id))
@@ -429,17 +482,35 @@ trainersRouter.get(
           order by count desc, t asc
         `),
 
+        /*
+         * Mean of each base stat across the ACTIVE roster.
+         *
+         * This was six `union all` arms each repeating the join and the where
+         * clause, and five of them had drifted from the sixth: none filtered
+         * out retired members, so the card averaged people who had left while
+         * its own subtitle said otherwise. Selecting the members once and
+         * unpivoting with a lateral VALUES makes the filter unrepeatable —
+         * there is now exactly one place it could be wrong.
+         */
         db.execute<{ stat: string; avg: number }>(sql`
-          select stat, round(avg(value))::int as avg
-          from (
-            select 'HP' as stat, p.hp as value from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-            union all select 'Attack', p.attack from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-            union all select 'Defense', p.defense from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-            union all select 'Sp. Atk', p.special_attack from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-            union all select 'Sp. Def', p.special_defense from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-            union all select 'Speed', p.speed from ${roster} r join ${pokemon} p on p.id = r.pokemon_id where r.trainer_id = ${id}
-          ) s
-          group by stat
+          with members as (
+            select p.hp, p.attack, p.defense, p.special_attack, p.special_defense, p.speed
+            from ${roster} r
+            join ${pokemon} p on p.id = r.pokemon_id
+            where r.trainer_id = ${id} and r.status <> 'retired'
+          )
+          select s.stat, round(avg(s.value))::int as avg
+          from members m
+          cross join lateral (values
+            (1, 'HP',      m.hp),
+            (2, 'Attack',  m.attack),
+            (3, 'Defense', m.defense),
+            (4, 'Sp. Atk', m.special_attack),
+            (5, 'Sp. Def', m.special_defense),
+            (6, 'Speed',   m.speed)
+          ) as s(ord, stat, value)
+          group by s.ord, s.stat
+          order by s.ord
         `),
 
         // Note history for the roster — every note on any Pokémon this trainer carries.
@@ -581,6 +652,111 @@ trainersRouter.get(
         query.historyPageSize,
         activityTotals?.count ?? 0,
       ),
+    });
+  }),
+);
+
+/**
+ * A member of the active roster with its **equipped** move types — the input to
+ * every figure on the analysis endpoint below.
+ *
+ * The left join to `roster_moves` is deliberate: a member with no moveset must
+ * still appear, contributing its defensive typing and counting against
+ * readiness. Inner-joining would quietly drop exactly the members the readiness
+ * report exists to find.
+ */
+interface AnalysisRow {
+  rosterId: number;
+  displayName: string;
+  nickname: string | null;
+  type1: string;
+  type2: string | null;
+  movesetSize: number;
+  equippedMoveTypes: string[];
+}
+
+/**
+ * GET /api/trainers/:id/analysis — how good is this team, actually.
+ *
+ * Separate from the dashboard payload above, which already runs 15+ queries and
+ * returns 11 keys. Both the trainer dashboard and the team page read this.
+ *
+ * Everything here is scoped to the **active roster** (`status <> 'retired'`),
+ * matching every other aggregate on the trainer dashboard.
+ */
+trainersRouter.get(
+  '/:id/analysis',
+  asyncHandler(async (req, res) => {
+    const { id } = idParamSchema.parse(req.params);
+
+    const [trainer] = await db
+      .select({ id: trainers.id, name: trainers.name })
+      .from(trainers)
+      .where(eq(trainers.id, id))
+      .limit(1);
+    if (!trainer) throw notFound(`No trainer with id ${id}`);
+
+    const rows = await db.execute(sql`
+      select
+        r.id                                             as "rosterId",
+        p.display_name                                   as "displayName",
+        r.nickname                                       as "nickname",
+        p.type1                                          as "type1",
+        p.type2                                          as "type2",
+        count(rm.id)::int                                as "movesetSize",
+        -- Damaging moves only: a Grass-type status move gives no Grass
+        -- coverage. A filter clause yields null when nothing matches, so the
+        -- coalesce turns "no equipped moves" into an empty array, not a null.
+        coalesce(
+          array_agg(distinct m.type) filter (where m.damage_class <> 'status'),
+          '{}'
+        )                                                as "equippedMoveTypes"
+      from ${roster} r
+      join ${pokemon} p on p.id = r.pokemon_id
+      left join ${rosterMoves} rm on rm.roster_id = r.id
+      left join ${moves} m on m.id = rm.move_id
+      where r.trainer_id = ${id} and r.status <> 'retired'
+      group by r.id, p.display_name, r.nickname, p.type1, p.type2
+      order by p.display_name
+    `);
+
+    const members = rows.rows as unknown as AnalysisRow[];
+    const chart = await loadTypeChart();
+
+    const offense = offensiveCoverage(chart, members);
+    const defense = rosterVulnerabilities(chart, members);
+
+    // A gap is a type nothing on the team hits for extra damage. The team can
+    // still attack it — it just never gets the advantage.
+    const gaps = offense.filter((entry) => entry.bestMultiplier <= 100).map((entry) => entry.type);
+
+    // A threat hits more than one member hard AND has no super-effective
+    // answer. Either alone is survivable; together is what loses a match, and
+    // it is the one thing this whole endpoint exists to surface.
+    const gapSet = new Set(gaps);
+    const threats = defense
+      .filter((entry) => entry.weakCount >= 2 && gapSet.has(entry.type))
+      .sort((a, b) => b.weakCount - a.weakCount || a.type.localeCompare(b.type));
+
+    res.json({
+      trainer,
+      offense,
+      defense,
+      gaps,
+      threats,
+      readiness: {
+        activeMembers: members.length,
+        /** Slots filled across the roster, out of four per member. */
+        withFullMoveset: members.filter((m) => m.movesetSize === 4).length,
+        withPartialMoveset: members.filter((m) => m.movesetSize > 0 && m.movesetSize < 4).length,
+        withoutMoveset: members.filter((m) => m.movesetSize === 0).length,
+        members: members.map((m) => ({
+          rosterId: m.rosterId,
+          displayName: m.displayName,
+          nickname: m.nickname,
+          movesetSize: m.movesetSize,
+        })),
+      },
     });
   }),
 );

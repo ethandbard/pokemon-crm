@@ -67,6 +67,18 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    // Sits next to Trainers: it answers a question about one roster, where the
+    // Performance Dashboard below explores the whole dex.
+    to: '/team',
+    label: 'Team Dashboard',
+    icon: icon(
+      <>
+        <path d="M12 3l7.5 4v5c0 4.2-3 7.6-7.5 9-4.5-1.4-7.5-4.8-7.5-9V7z" />
+        <path d="m9 12 2 2 4-4" />
+      </>,
+    ),
+  },
+  {
     to: '/dashboard',
     label: 'Performance Dashboard',
     icon: icon(
@@ -105,6 +117,17 @@ const NAV_ITEMS: NavItem[] = [
         <rect x="3" y="3.5" width="18" height="17" rx="2" />
         <path d="M3 9.5h18" />
         <path d="M11 9.5v11" />
+      </>,
+    ),
+  },
+  {
+    // Last in the rail: workspace plumbing, not day-to-day work.
+    to: '/admin',
+    label: 'Admin',
+    icon: icon(
+      <>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" />
       </>,
     ),
   },

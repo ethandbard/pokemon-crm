@@ -13,7 +13,7 @@ import {
 } from 'recharts';
 import { useApi } from '../lib/useApi';
 import { api, toQueryString } from '../lib/api';
-import type { ActivityKind, PokemonProfileResponse } from '../lib/types';
+import type { ActivityKind, PokemonProfileResponse, TypeMatchup } from '../lib/types';
 import {
   Button,
   Card,
@@ -34,6 +34,7 @@ import {
   ACTIVITY_META,
   ROSTER_STATUS_META,
   dexNumber,
+  effectivenessLabel,
   formatDate,
   formatGenderRate,
   formatHeight,
@@ -41,6 +42,7 @@ import {
   slugLabel,
   titleCase,
 } from '../lib/format';
+import { PAGE_CONTAINER } from '../lib/page';
 
 const ACTIVITY_ORDER: ActivityKind[] = ['caught', 'favorite', 'wishlist', 'flagged', 'reviewed'];
 
@@ -63,6 +65,31 @@ const EV_FIELDS = [
   { key: 'evSpecialDefense', label: 'Sp. Def' },
   { key: 'evSpeed', label: 'Speed' },
 ] as const;
+
+/**
+ * One row of the matchup card. Renders nothing when the list is empty, so a
+ * Pokémon with no immunities simply has no "Immune to" heading rather than a
+ * heading over a blank.
+ */
+function MatchupGroup({ label, matchups }: { label: string; matchups: TypeMatchup[] }) {
+  if (matchups.length === 0) return null;
+
+  return (
+    <div>
+      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">{label}</h3>
+      <ul className="flex flex-wrap gap-1.5">
+        {matchups.map((matchup) => (
+          <li key={matchup.type} className="flex items-center gap-1">
+            <TypeBadge type={matchup.type} />
+            <span className="text-xs tabular-nums text-muted">
+              {effectivenessLabel(matchup.multiplier)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export function ProfilePage() {
   const { id } = useParams<{ id: string }>();
@@ -97,7 +124,7 @@ export function ProfilePage() {
 
   if (loading && !data) {
     return (
-      <div className="mx-auto max-w-[1200px] px-8 py-7">
+      <div className={PAGE_CONTAINER}>
         <Loading label="Loading profile…" />
       </div>
     );
@@ -105,7 +132,7 @@ export function ProfilePage() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-[1200px] px-8 py-7">
+      <div className={PAGE_CONTAINER}>
         <ErrorState message={error} onRetry={refetch} />
       </div>
     );
@@ -113,7 +140,15 @@ export function ProfilePage() {
 
   if (!data) return null;
 
-  const { pokemon, notes, activity, neighbours, ranking, trainers, evolution, moveSummary } = data;
+  const { pokemon, notes, activity, neighbours, ranking, trainers, evolution, moveSummary, matchups } =
+    data;
+
+  // "as Fire / Flying" — the matchups follow from the type combination, so the
+  // card names it rather than making the reader look back up the page.
+  const typeLabel = [pokemon.type1, pokemon.type2]
+    .filter(Boolean)
+    .map((type) => titleCase(type as string))
+    .join(' / ');
   /*
    * The toggle buttons are **your** flags, not the workspace's: the API toggles
    * a row keyed on (pokemon, owner, kind), so showing another user's flag as
@@ -216,7 +251,7 @@ export function ProfilePage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1200px] px-8 py-7">
+    <div className={PAGE_CONTAINER}>
       <PageHeader
         title={pokemon.displayName}
         description={`${dexNumber(pokemon.id)} · Generation ${pokemon.generation}`}
@@ -238,7 +273,15 @@ export function ProfilePage() {
         }
       />
 
-      <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
+      {/*
+        Three rails at xl: reference data on the left, the species record in the
+        middle, and the CRM record — notes and the activity log — on the right,
+        where it stays in view alongside whatever you're reading.
+
+        At lg there is only room for two, so the CRM rail spans the full width
+        underneath rather than squeezing the middle column to nothing.
+      */}
+      <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_340px]">
         {/* ---- Left rail: identity, vitals, status flags ---- */}
         <div className="space-y-5">
           <Card>
@@ -362,7 +405,7 @@ export function ProfilePage() {
 
           <Card
             title="Status"
-            subtitle={`Your flags as ${actingUserLabel} — others' appear in the log below`}
+            subtitle={`Your flags as ${actingUserLabel} — others' appear in the activity log`}
           >
             <div className="flex flex-wrap gap-2">
               {ACTIVITY_ORDER.map((kind) => {
@@ -391,80 +434,6 @@ export function ProfilePage() {
             </div>
             {lastReviewed && (
               <p className="mt-3 text-xs text-muted">Last reviewed {formatDate(lastReviewed)}</p>
-            )}
-          </Card>
-
-          <Card
-            title="Activity log"
-            subtitle={`${activity.length} ${activity.length === 1 ? 'entry' : 'entries'} for this Pokémon`}
-            actions={
-              activity.length > 0 ? (
-                <Link
-                  to={`/activity${toQueryString({ pokemonId: pokemon.id })}`}
-                  className="text-xs font-medium text-brand hover:underline"
-                >
-                  View all →
-                </Link>
-              ) : undefined
-            }
-          >
-            {activityError && (
-              <p className="mb-3 text-xs text-status-critical">
-                <span aria-hidden="true">▲ </span>
-                {activityError}
-              </p>
-            )}
-
-            {activity.length === 0 ? (
-              <EmptyState
-                title="No activity yet"
-                description="Set a status above and it will be logged here with a timestamp."
-              />
-            ) : (
-              <ol className="space-y-2">
-                {/* Newest first — the log reads as a history. */}
-                {[...activity]
-                  .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-                  .map((entry) => {
-                    const meta = ACTIVITY_META[entry.kind];
-                    const reSet = entry.updatedAt !== entry.createdAt;
-                    return (
-                      <li
-                        key={entry.id}
-                        className="flex items-start gap-2.5 rounded-lg border border-hairline p-2.5"
-                      >
-                        <span
-                          aria-hidden="true"
-                          className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand/10 text-[11px] text-brand-strong"
-                        >
-                          {meta.icon}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-ink">{meta.label}</p>
-                          <p className="mt-0.5 text-xs text-muted">
-                            {reSet ? 'Updated' : 'Set'} {formatDate(entry.updatedAt)} by{' '}
-                            <span title={entry.owner}>{labelFor(entry.owner)}</span>
-                          </p>
-                          {reSet && (
-                            <p className="text-xs text-muted">
-                              First set {formatDate(entry.createdAt)}
-                            </p>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            removeActivity(entry.id, entry.kind, meta.label, entry.owner)
-                          }
-                          disabled={removingId === entry.id}
-                          className="shrink-0 text-xs text-muted hover:text-status-critical disabled:opacity-50"
-                        >
-                          {removingId === entry.id ? 'Removing…' : 'Remove'}
-                        </button>
-                      </li>
-                    );
-                  })}
-              </ol>
             )}
           </Card>
 
@@ -512,6 +481,28 @@ export function ProfilePage() {
                   );
                 })}
               </ul>
+            )}
+          </Card>
+
+          {/* Defensive matchups only — what this Pokémon TAKES. What it can
+              hit back with is a movepool question, answered by the movepool
+              card's coverage figure rather than by its types. */}
+          <Card
+            title="Type matchups"
+            subtitle={`Damage taken as ${typeLabel}`}
+          >
+            {matchups.weaknesses.length === 0 &&
+            matchups.resistances.length === 0 &&
+            matchups.immunities.length === 0 ? (
+              <p className="text-sm text-muted">
+                Neutral against all 18 types — no weaknesses or resistances.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                <MatchupGroup label="Weak to" matchups={matchups.weaknesses} />
+                <MatchupGroup label="Resists" matchups={matchups.resistances} />
+                <MatchupGroup label="Immune to" matchups={matchups.immunities} />
+              </div>
             )}
           </Card>
 
@@ -702,6 +693,16 @@ export function ProfilePage() {
             </Card>
           )}
 
+          <p className="text-xs text-muted">
+            Looking for another Pokémon?{' '}
+            <Link to="/lookup" className="text-brand hover:underline">
+              Back to lookup
+            </Link>
+          </p>
+        </div>
+
+        {/* ---- Right rail: the CRM record for this species ---- */}
+        <div className="space-y-5 lg:col-span-2 xl:col-span-1">
           <Card title="Notes" subtitle={`${notes.length} on this Pokémon`}>
             <NoteComposer pokemonId={pokemon.id} onSaved={refetch} />
 
@@ -731,12 +732,79 @@ export function ProfilePage() {
             </div>
           </Card>
 
-          <p className="text-xs text-muted">
-            Looking for another Pokémon?{' '}
-            <Link to="/lookup" className="text-brand hover:underline">
-              Back to lookup
-            </Link>
-          </p>
+          <Card
+            title="Activity log"
+            subtitle={`${activity.length} ${activity.length === 1 ? 'entry' : 'entries'} for this Pokémon`}
+            actions={
+              activity.length > 0 ? (
+                <Link
+                  to={`/activity${toQueryString({ pokemonId: pokemon.id })}`}
+                  className="text-xs font-medium text-brand hover:underline"
+                >
+                  View all →
+                </Link>
+              ) : undefined
+            }
+          >
+            {activityError && (
+              <p className="mb-3 text-xs text-status-critical">
+                <span aria-hidden="true">▲ </span>
+                {activityError}
+              </p>
+            )}
+
+            {activity.length === 0 ? (
+              <EmptyState
+                title="No activity yet"
+                description="Set a status flag in the left rail and it will be logged here with a timestamp."
+              />
+            ) : (
+              <ol className="space-y-2">
+                {/* Newest first — the log reads as a history. */}
+                {[...activity]
+                  .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+                  .map((entry) => {
+                    const meta = ACTIVITY_META[entry.kind];
+                    const reSet = entry.updatedAt !== entry.createdAt;
+                    return (
+                      <li
+                        key={entry.id}
+                        className="flex items-start gap-2.5 rounded-lg border border-hairline p-2.5"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand/10 text-[11px] text-brand-strong"
+                        >
+                          {meta.icon}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-ink">{meta.label}</p>
+                          <p className="mt-0.5 text-xs text-muted">
+                            {reSet ? 'Updated' : 'Set'} {formatDate(entry.updatedAt)} by{' '}
+                            <span title={entry.owner}>{labelFor(entry.owner)}</span>
+                          </p>
+                          {reSet && (
+                            <p className="text-xs text-muted">
+                              First set {formatDate(entry.createdAt)}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            removeActivity(entry.id, entry.kind, meta.label, entry.owner)
+                          }
+                          disabled={removingId === entry.id}
+                          className="shrink-0 text-xs text-muted hover:text-status-critical disabled:opacity-50"
+                        >
+                          {removingId === entry.id ? 'Removing…' : 'Remove'}
+                        </button>
+                      </li>
+                    );
+                  })}
+              </ol>
+            )}
+          </Card>
         </div>
       </div>
     </div>

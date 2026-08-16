@@ -3,6 +3,7 @@ import { useApi } from '../lib/useApi';
 import type { DashboardResponse } from '../lib/types';
 import { Card, ErrorState, Loading, StatTile } from '../components/ui';
 import { AttentionQueue } from '../components/AttentionQueue';
+import { PAGE_CONTAINER } from '../lib/page';
 
 interface Destination {
   to: string;
@@ -164,7 +165,7 @@ export function HomePage() {
     : 0;
 
   return (
-    <div className="mx-auto max-w-[1200px] px-8 py-10">
+    <div className={PAGE_CONTAINER}>
       <header className="mb-8">
         <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-brand text-lg font-bold text-white">
           P

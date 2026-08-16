@@ -1,9 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { pokemon, roster, trainers } from '../db/schema.js';
-import { asyncHandler, badRequest, notFound } from '../http.js';
+import { moves, pokemon, pokemonMoves, roster, rosterMoves, trainers } from '../db/schema.js';
+import { asyncHandler, badRequest, forbidden, notFound } from '../http.js';
+import { ownerFor } from '../owner.js';
 
 /**
  * Mutations on individual roster entries. Creating one lives on the trainer
@@ -13,6 +14,27 @@ import { asyncHandler, badRequest, notFound } from '../http.js';
 export const rosterRouter = Router();
 
 const idParamSchema = z.object({ id: z.coerce.number().int().min(1) });
+
+/**
+ * Refuses when the acting user does not own the trainer this entry belongs to.
+ *
+ * Roster entries have no owner of their own — they inherit the trainer's, so
+ * ownership is always one join away. A transfer has to clear **both** sides:
+ * you cannot push a Pokémon onto someone else's roster, and you cannot pull one
+ * off theirs.
+ */
+async function assertOwnsTrainer(req: Parameters<typeof ownerFor>[0], trainerId: number) {
+  const [trainer] = await db
+    .select({ name: trainers.name, owner: trainers.owner })
+    .from(trainers)
+    .where(eq(trainers.id, trainerId))
+    .limit(1);
+
+  if (!trainer) throw badRequest(`No trainer with id ${trainerId}`);
+  if (trainer.owner !== ownerFor(req)) {
+    throw forbidden(`${trainer.name} belongs to another user — switch to them to make changes`);
+  }
+}
 
 const patchSchema = z
   .object({
@@ -39,14 +61,12 @@ rosterRouter.patch(
 
     const [entry] = await db.select().from(roster).where(eq(roster.id, id)).limit(1);
     if (!entry) throw notFound(`No roster entry with id ${id}`);
+    await assertOwnsTrainer(req, entry.trainerId);
 
     if (input.trainerId !== undefined && input.trainerId !== entry.trainerId) {
-      const [trainer] = await db
-        .select({ id: trainers.id })
-        .from(trainers)
-        .where(eq(trainers.id, input.trainerId))
-        .limit(1);
-      if (!trainer) throw badRequest(`No trainer with id ${input.trainerId}`);
+      // Both ends of a transfer must be yours. This also proves the
+      // destination exists, so no separate existence check is needed.
+      await assertOwnsTrainer(req, input.trainerId);
 
       // The destination roster may already carry this Pokémon; the unique
       // index would reject it, so say so plainly instead.
@@ -81,11 +101,132 @@ rosterRouter.patch(
   }),
 );
 
+/**
+ * The four move slots a roster entry carries, in slot order, with enough of the
+ * move to render a row without a second request.
+ */
+async function movesetFor(rosterId: number) {
+  return db
+    .select({
+      slot: rosterMoves.slot,
+      moveId: moves.id,
+      name: moves.name,
+      displayName: moves.displayName,
+      type: moves.type,
+      damageClass: moves.damageClass,
+      power: moves.power,
+      accuracy: moves.accuracy,
+      pp: moves.pp,
+    })
+    .from(rosterMoves)
+    .innerJoin(moves, eq(moves.id, rosterMoves.moveId))
+    .where(eq(rosterMoves.rosterId, rosterId))
+    .orderBy(asc(rosterMoves.slot));
+}
+
+/** GET /api/roster/:id/moves — the current moveset. */
+rosterRouter.get(
+  '/:id/moves',
+  asyncHandler(async (req, res) => {
+    const { id } = idParamSchema.parse(req.params);
+    const [entry] = await db.select({ id: roster.id }).from(roster).where(eq(roster.id, id)).limit(1);
+    if (!entry) throw notFound(`No roster entry with id ${id}`);
+
+    res.json({ moveset: await movesetFor(id) });
+  }),
+);
+
+/**
+ * The moveset, as an ordered list of move ids — slot 1 first.
+ *
+ * Four is the game's limit and the number every coverage figure downstream
+ * assumes. An empty array clears the moveset, which is why this is a PUT of the
+ * whole set rather than per-slot patching: one round trip, atomic, and no way to
+ * leave slot 3 pointing at a move that slot 1 was just given.
+ */
+const movesetSchema = z.object({
+  moveIds: z.array(z.number().int().min(1)).max(4),
+});
+
+/** PUT /api/roster/:id/moves */
+rosterRouter.put(
+  '/:id/moves',
+  asyncHandler(async (req, res) => {
+    const { id } = idParamSchema.parse(req.params);
+    const { moveIds } = movesetSchema.parse(req.body);
+
+    const [entry] = await db
+      .select({ id: roster.id, pokemonId: roster.pokemonId, trainerId: roster.trainerId })
+      .from(roster)
+      .where(eq(roster.id, id))
+      .limit(1);
+    if (!entry) throw notFound(`No roster entry with id ${id}`);
+    await assertOwnsTrainer(req, entry.trainerId);
+
+    if (new Set(moveIds).size !== moveIds.length) {
+      throw badRequest('A moveset cannot carry the same move twice');
+    }
+
+    // **The rule that makes this feature mean anything**: a move must be one
+    // this species can actually learn. It is a constraint against a join, so no
+    // foreign key can carry it — it lives here, and nothing else writes the
+    // table. Without it the coverage analysis is just a wish list.
+    if (moveIds.length > 0) {
+      const legal = await db
+        .select({ moveId: pokemonMoves.moveId })
+        .from(pokemonMoves)
+        .where(and(eq(pokemonMoves.pokemonId, entry.pokemonId), inArray(pokemonMoves.moveId, moveIds)));
+
+      const legalIds = new Set(legal.map((row) => row.moveId));
+      const illegal = moveIds.filter((moveId) => !legalIds.has(moveId));
+
+      if (illegal.length > 0) {
+        // Name them — an id in an error message is not actionable.
+        const named = await db
+          .select({ displayName: moves.displayName })
+          .from(moves)
+          .where(inArray(moves.id, illegal));
+        const [species] = await db
+          .select({ displayName: pokemon.displayName })
+          .from(pokemon)
+          .where(eq(pokemon.id, entry.pokemonId))
+          .limit(1);
+
+        const label = named.length > 0 ? named.map((m) => m.displayName).join(', ') : illegal.join(', ');
+        throw badRequest(`${species?.displayName ?? 'This Pokémon'} cannot learn ${label}`);
+      }
+    }
+
+    // Replace wholesale inside one transaction: a half-applied moveset would
+    // report coverage the trainer does not have.
+    await db.transaction(async (tx) => {
+      await tx.delete(rosterMoves).where(eq(rosterMoves.rosterId, id));
+      if (moveIds.length > 0) {
+        await tx.insert(rosterMoves).values(
+          moveIds.map((moveId, index) => ({ rosterId: id, moveId, slot: index + 1 })),
+        );
+      }
+      await tx.update(roster).set({ updatedAt: new Date() }).where(eq(roster.id, id));
+    });
+
+    res.json({ moveset: await movesetFor(id) });
+  }),
+);
+
 /** DELETE /api/roster/:id */
 rosterRouter.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const { id } = idParamSchema.parse(req.params);
+
+    const [entry] = await db
+      .select({ trainerId: roster.trainerId })
+      .from(roster)
+      .where(eq(roster.id, id))
+      .limit(1);
+    if (!entry) throw notFound(`No roster entry with id ${id}`);
+    await assertOwnsTrainer(req, entry.trainerId);
+
     const [deleted] = await db.delete(roster).where(eq(roster.id, id)).returning({ id: roster.id });
     if (!deleted) throw notFound(`No roster entry with id ${id}`);
     res.status(204).end();

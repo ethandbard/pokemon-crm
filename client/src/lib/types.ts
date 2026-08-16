@@ -183,7 +183,14 @@ export interface Trainer {
   name: string;
   region: string | null;
   specialty: string | null;
+  /** The trainer's own contact address — **not** the managing user. */
   email: string | null;
+  /**
+   * The `users.email` of whoever manages this trainer. Compare against the
+   * acting email to decide whether write controls are enabled; the API
+   * enforces the same rule with a 403.
+   */
+  owner: string;
   bio: string | null;
 }
 
@@ -216,10 +223,14 @@ export interface RosterMember {
   isLegendary: boolean;
   spriteUrl: string | null;
   noteCount: number;
-  /** Distinct moves learnable. */
+  /** Distinct moves learnable — the ceiling, not what it carries. */
   moveCount: number;
-  /** Distinct types it can attack with — status moves excluded. */
+  /** Distinct types it *could* attack with — status moves excluded. */
   coverageCount: number;
+  /** Slots filled of four. This is the equipped moveset, keyed per roster entry. */
+  movesetSize: number;
+  /** Distinct types the equipped moves reach — status moves excluded. */
+  movesetCoverage: number;
   activityKinds: ActivityKind[];
 
   // Evolution progress — the "degree progress" model.
@@ -239,12 +250,27 @@ export interface RosterMember {
   milestoneEligible: boolean;
 }
 
+/**
+ * Why a roster member is in the queue. All four are rules over recorded facts;
+ * the old `behind_pace` signal rested on an invented EXP-per-day constant and
+ * was removed with it.
+ */
 export type AttentionReasonCode =
+  | 'moveset_missing'
+  | 'moveset_incomplete'
   | 'never_reviewed'
-  | 'stale_review'
-  | 'flagged'
-  | 'milestone_overdue'
-  | 'behind_pace';
+  | 'stale_review';
+
+/** Why a whole roster is flagged, independent of any one member. */
+export type RosterAlertCode = 'roster_incomplete' | 'unanswered_weakness';
+
+export interface RosterAlert {
+  code: RosterAlertCode;
+  trainerId: number;
+  trainerName: string;
+  label: string;
+  detail: string;
+}
 
 export interface AttentionReason {
   code: AttentionReasonCode;
@@ -267,11 +293,8 @@ export interface AttentionItem {
   status: RosterStatus;
   daysOnRoster: number;
   daysSinceReview: number | null;
-  isFlagged: boolean;
-  milestoneOverdue: boolean;
-  nextEvolutionName: string | null;
-  nextEvolutionLevel: number | null;
-  expectedLevel: number | null;
+  /** Filled move slots, 0–4. */
+  movesetSize: number;
   score: number;
   reasons: AttentionReason[];
 }
@@ -282,7 +305,13 @@ export interface AttentionResponse {
   scanned: number;
   /** How many had at least one firing signal. */
   flagged: number;
-  model: { staleAfterDays: number; behindPaceTolerance: number; expPerDay: number };
+  /**
+   * Roster-level problems, which belong to a team rather than a member.
+   * Capped on the workspace-wide view; `alertsTotal` is the unclipped count.
+   */
+  alerts: RosterAlert[];
+  alertsTotal: number;
+  model: { staleAfterDays: number; fullRosterSize: number; sharedWeaknessMembers: number };
 }
 
 export interface EvolutionLink {
@@ -357,6 +386,73 @@ export interface EvolutionRequirement {
   relativePhysicalStats?: number;
   needsOverworldRain?: boolean;
   turnUpsideDown?: boolean;
+}
+
+/** Workspace health and attribution, from `GET /api/admin/overview`. */
+export interface AdminOverview {
+  counts: Record<string, number>;
+  /** Reference tables the seed owns, with what a complete import looks like. */
+  tables: {
+    key: string;
+    label: string;
+    expected: number | null;
+    seededBy: string;
+    actual: number;
+    status: 'ok' | 'partial' | 'empty';
+  }[];
+  /** Owner strings with no matching user row — see § users on the missing FK. */
+  orphans: { owner: string; trainers: number; notes: number; activity: number }[];
+  defaultOwner: string;
+}
+
+/** One equipped move on a roster entry. Slot is 1–4, mirroring the games. */
+export interface MovesetSlot {
+  slot: number;
+  moveId: number;
+  name: string;
+  displayName: string;
+  type: string;
+  damageClass: MoveDamageClass;
+  power: number | null;
+  accuracy: number | null;
+  pp: number | null;
+}
+
+/**
+ * Team analysis for one trainer's **active** roster, from
+ * `GET /api/trainers/:id/analysis`.
+ *
+ * Everything here is computed from *equipped* moves (`roster_moves`), not the
+ * learnable movepool — that distinction is the whole point of the feature.
+ */
+export interface TrainerAnalysis {
+  trainer: { id: number; name: string };
+  /**
+   * All 18 types, with the best multiplier the team's moves achieve.
+   * `answeredBy` counts members with a *super-effective* answer, which is not
+   * `members.length` — that ties on the best result even when it is neutral.
+   */
+  offense: { type: string; bestMultiplier: number; members: string[]; answeredBy: number }[];
+  /** All 18 types, with how many members each one hits hard. */
+  defense: { type: string; weakCount: number; resistCount: number; weakMembers: string[] }[];
+  /** Types nothing on the team hits for extra damage. */
+  gaps: string[];
+  /** Types that hit 2+ members hard AND have no super-effective answer. */
+  threats: { type: string; weakCount: number; resistCount: number; weakMembers: string[] }[];
+  readiness: {
+    activeMembers: number;
+    withFullMoveset: number;
+    withPartialMoveset: number;
+    withoutMoveset: number;
+    members: { rosterId: number; displayName: string; nickname: string | null; movesetSize: number }[];
+  };
+}
+
+/** One attacking type and what it does to a defender, in hundredths. */
+export interface TypeMatchup {
+  type: string;
+  /** 0, 25, 50, 200 or 400. Neutral (100) matchups are never returned. */
+  multiplier: number;
 }
 
 /** Full record from the `pokemon` table. */
@@ -499,6 +595,16 @@ export interface PokemonProfileResponse {
   /** The full movepool, level-up moves first in level order. */
   moves: MovepoolEntry[];
   moveSummary: MoveSummary | null;
+  /**
+   * Defensive matchups, computed server-side from the type chart. Neutral
+   * types are omitted from all three lists — they are most of the 18 and say
+   * nothing. `multiplier` is hundredths: 25, 50, 200, 400.
+   */
+  matchups: {
+    weaknesses: TypeMatchup[];
+    resistances: TypeMatchup[];
+    immunities: TypeMatchup[];
+  };
   neighbours: {
     previous: { id: number; displayName: string; spriteUrl: string | null } | null;
     next: { id: number; displayName: string; spriteUrl: string | null } | null;

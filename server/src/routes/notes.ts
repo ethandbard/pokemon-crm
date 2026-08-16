@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { notes, pokemon, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
@@ -34,7 +34,14 @@ notesRouter.get(
     const query = listQuerySchema.parse(req.query);
 
     const filters: SQL[] = [];
-    if (query.search) filters.push(ilike(notes.body, `%${query.search}%`));
+    if (query.search) {
+      // Note text OR the Pokémon's name: the feed is browsed by subject at
+      // least as often as by wording, and searching "Charizard" here used to
+      // return nothing. Both the row query and the count join `pokemon`, so the
+      // same `where` works for each.
+      const term = `%${query.search}%`;
+      filters.push(or(ilike(notes.body, term), ilike(pokemon.displayName, term)) as SQL);
+    }
     if (query.pokemonId !== undefined) filters.push(eq(notes.pokemonId, query.pokemonId));
     if (query.owner) filters.push(eq(notes.owner, query.owner));
     if (query.trainerId !== undefined) {
@@ -75,6 +82,11 @@ notesRouter.get(
         .innerJoin(pokemon, eq(notes.pokemonId, pokemon.id))
         .where(where),
       db.selectDistinct({ owner: notes.owner }).from(notes).orderBy(asc(notes.owner)),
+      /*
+       * Deliberately NOT owner-scoped. Notes are workspace-visible by design,
+       * so a filter that could only reach your own trainers would be unable to
+       * narrow rows you can plainly see. Same reasoning on the Activity page.
+       */
       db.select({ id: trainers.id, name: trainers.name }).from(trainers).orderBy(asc(trainers.name)),
     ]);
 

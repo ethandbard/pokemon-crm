@@ -18,6 +18,7 @@ import { PageHeader } from '../components/PageHeader';
 import { SavedViews } from '../components/SavedViews';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { ACTIVITY_META, dexNumber, formatDate } from '../lib/format';
+import { PAGE_CONTAINER } from '../lib/page';
 
 /** Sortable columns, keyed to the API's `sort` allow-list. */
 const COLUMNS = [
@@ -95,7 +96,7 @@ export function ActivityPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1300px] px-8 py-7">
+    <div className={PAGE_CONTAINER}>
       <PageHeader
         title="Activity"
         description="Every status flag set across the collection. Flags are toggled from a Pokémon's profile."
