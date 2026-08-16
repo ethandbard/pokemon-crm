@@ -299,7 +299,7 @@ export function DashboardPage() {
       {filterBar}
 
       {/* ---- Headline figures ---- */}
-      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-7">
         <StatTile label="Pokémon" value={summary.total.toLocaleString()} />
         <StatTile label="Mean BST" value={summary.avg_base_stat_total} hint="base stat total" />
         <StatTile label="Median BST" value={summary.median_base_stat_total} />
@@ -309,6 +309,14 @@ export function DashboardPage() {
         />
         <StatTile label="Legendary" value={summary.legendary} />
         <StatTile label="Mythical" value={summary.mythical} />
+        {/* PokeAPI records a hidden ability for 856 of 1,025 species, so this
+            never reaches the total — the hint says so rather than leaving it
+            looking like a seeding gap. */}
+        <StatTile
+          label="Hidden ability"
+          value={summary.with_hidden_ability}
+          hint="not recorded for every species"
+        />
       </div>
 
       {/* ---- CRM activity: sits directly under the headline tiles ---- */}
@@ -705,6 +713,84 @@ export function DashboardPage() {
                     <DamageClassBadge damageClass={move.damage_class} />
                     <span className="w-12 text-right text-sm font-medium tabular-nums text-ink">
                       {move.learners.toLocaleString()}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
+
+        {/*
+          A species with two abilities is counted under each — the same double
+          count the type breakdown has, and cheaper to state than to explain a
+          distinct-species denominator nobody reads correctly.
+        */}
+        <Card
+          title="Most common abilities"
+          subtitle="A species with two abilities is counted under each. Hidden abilities are excluded — they are a separate column."
+        >
+          {data.abilityBreakdown.length === 0 ? (
+            <EmptyState
+              title="No ability data"
+              description="Run npm run seed:abilities to import ability effect text."
+            />
+          ) : (
+            <ResponsiveContainer width="100%" height={340}>
+              <BarChart
+                data={data.abilityBreakdown}
+                layout="vertical"
+                margin={{ top: 4, right: 12, bottom: 4, left: 8 }}
+              >
+                {/* Horizontal bars, so the grid runs the other way and the
+                    rounded data-end is on the right. */}
+                <CartesianGrid horizontal={false} stroke="var(--color-hairline)" />
+                <XAxis type="number" {...axisProps} />
+                <YAxis type="category" dataKey="name" width={110} {...axisProps} />
+                <Tooltip
+                  {...tooltipProps}
+                  formatter={(value: number) => [value.toLocaleString(), 'Species']}
+                />
+                <Bar
+                  dataKey="species"
+                  name="Species"
+                  fill={SERIES_1}
+                  radius={[0, 4, 4, 0]}
+                  isAnimationActive={false}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
+
+        {/*
+          A shopping list, which "most widely learned moves" cannot answer —
+          that chart does not distinguish how a move is obtained.
+        */}
+        <Card
+          title="TMs that reach the most species"
+          subtitle="Counted within the current selection. The number shown is the latest game's — TMs are renumbered every generation."
+        >
+          {data.topMachines.length === 0 ? (
+            <EmptyState
+              title="No machine data"
+              description="Run npm run seed:machines to import TM numbers."
+            />
+          ) : (
+            <ol className="space-y-1.5">
+              {data.topMachines.map((machine) => (
+                <li key={machine.id}>
+                  <Link
+                    to={`/moves/${machine.id}`}
+                    className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-plane"
+                  >
+                    <span className="w-14 shrink-0 text-xs font-medium tabular-nums text-muted">
+                      {machine.tm_number}
+                    </span>
+                    <span className="flex-1 truncate text-sm text-ink">{machine.display_name}</span>
+                    <TypeBadge type={machine.type} />
+                    <span className="w-12 text-right text-sm font-medium tabular-nums text-ink">
+                      {machine.learners.toLocaleString()}
                     </span>
                   </Link>
                 </li>

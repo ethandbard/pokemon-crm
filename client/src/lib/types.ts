@@ -492,6 +492,33 @@ export interface TrainerAnalysis {
     withoutMoveset: number;
     members: { rosterId: number; displayName: string; nickname: string | null; movesetSize: number }[];
   };
+  /**
+   * Build completeness — a **sibling** of `readiness`, not part of it.
+   *
+   * `readiness` carries the page's stated caveat: every figure on `/team` is
+   * only as true as the movesets behind it. That is true of movesets and false
+   * of these, none of which any figure reads. Three separate counters rather
+   * than one composite, which would need a denominator the app cannot defend
+   * and would read as a team-strength score.
+   */
+  build: {
+    activeMembers: number;
+    withAbility: number;
+    withNature: number;
+    withItem: number;
+    members: {
+      rosterId: number;
+      ability: string | null;
+      abilityName: string | null;
+      nature: string | null;
+      natureName: string | null;
+      /** Null both for "no nature" and for the five neutral ones. */
+      natureIncreasedStat: string | null;
+      natureDecreasedStat: string | null;
+      heldItem: string | null;
+      heldItemName: string | null;
+    }[];
+  };
 }
 
 /** One attacking type and what it does to a defender, in hundredths. */
@@ -768,6 +795,8 @@ export interface DashboardResponse {
     max_base_stat_total: number;
     min_base_stat_total: number;
     median_base_stat_total: number;
+    /** Coverage is 856/1025 dex-wide — PokeAPI has none for the rest. */
+    with_hidden_ability: number;
   } | null;
   typeBreakdown: {
     type: string;
@@ -833,6 +862,27 @@ export interface DashboardResponse {
     power: number | null;
     learners: number;
   }[];
+  /**
+   * Abilities by how many species in scope have them.
+   *
+   * **A species with two abilities is counted under each**, the same double
+   * count the type breakdown has. Hidden abilities are excluded — they live in
+   * their own column, and `summary.with_hidden_ability` counts them separately.
+   */
+  abilityBreakdown: {
+    slug: string;
+    name: string;
+    species: number;
+    avg_base_stat_total: number;
+  }[];
+  /** The TMs reaching the most species in scope. `tm_number` is the latest one. */
+  topMachines: {
+    id: number;
+    display_name: string;
+    type: string;
+    tm_number: string;
+    learners: number;
+  }[];
   /** What the filter bar is currently scoping every figure above to. */
   scope: {
     filtered: number;
@@ -847,6 +897,7 @@ export interface DashboardResponse {
       habitat: string | null;
       eggGroup: string | null;
       growthRate: string | null;
+      ability: string | null;
       minBaseStatTotal: number | null;
       maxBaseStatTotal: number | null;
     };

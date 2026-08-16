@@ -1,8 +1,9 @@
 # TODO
 
-Items 1, 2, 3a, 3c, 4, 5 and 6 are done. **Item 7 — the roster-building pivot —
-is complete** — all four phases landed. **Item 8 is the active work**; 3b's
-remaining bullets (varieties, encounters) follow it.
+Items 1, 2, 3a, 3c, 4, 5, 6 and 7 are done. **Item 8 — the second round of
+PokéAPI imports — is complete**: abilities, natures, machines and held items all
+landed, with the roster columns and dashboard figures they enable. 3b's
+remaining bullets (varieties, encounters) are the next unclaimed work.
 
 ---
 
@@ -287,8 +288,7 @@ Three findings worth keeping:
   right-aligned short values. Abilities moved out to a stacked block; the rule
   is now in CLAUDE.md § Frontend conventions.
 
-Still open: the abilities dimension on the Dashboard ships with the dashboards
-commit, not here.
+The abilities dimension on the Dashboard shipped separately — see 8e.
 
 ### ✅ 8b. Natures — DONE (data layer)
 
@@ -371,6 +371,30 @@ Three things worth keeping:
 Still deliberately true: **team analysis does not read items**, and there is no
 per-species legality rule to build a recommendation on.
 
+### ✅ 8e. Surfacing it in aggregate — DONE
+
+`GET /api/trainers/:id/analysis` gained a **`build`** key — a sibling of
+`readiness`, not part of it — and the Team page's Members table gained Ability,
+Nature and Item columns with counters beneath it. `/api/stats/dashboard` gained
+`abilityBreakdown`, `topMachines`, an `ability` filter and a hidden-ability
+tile.
+
+Four things worth keeping:
+
+- **`build` had to be a sibling.** `readiness` carries the claim the page states
+  out loud — every figure is only as true as the movesets behind it — which is
+  false of abilities, natures and items. The four readiness tiles were left
+  alone for the same reason; the counters went under the Members table.
+- **No composite "build completeness" figure**, deliberately. Four moves plus
+  three fields has no defensible denominator, and the number would read as a
+  team-strength score.
+- **The four new left joins did not fan out the grouped analysis query** —
+  verified: still six members, `readiness` and `threats` unchanged.
+- **The Dashboard's filters are local state, not URL-synced**, so
+  `/dashboard?type=fire` does nothing. Pre-existing, and worth fixing given
+  `scope.filters` is echoed back specifically to make a linked dashboard
+  self-describing.
+
 ---
 
 ## Known gaps (not yet scheduled)
@@ -386,8 +410,12 @@ per-species legality rule to build a recommendation on.
   trainer ownership scopes reads and 403s writes, which is real behaviour built
   on an unverified claim. Auth is the one gap that turns a convention into a
   guarantee.
-- **Single ~720 kB JS chunk.** Route-level `React.lazy` would split Recharts out
+- **Single ~770 kB JS chunk.** Route-level `React.lazy` would split Recharts out
   of the pages that don't chart.
+- **The Performance Dashboard's filters live in React state, not the URL.** The
+  API echoes `scope.filters` back precisely so a linked dashboard is
+  self-describing, but the page never reads them, so `/dashboard?type=fire` is
+  ignored. Found while verifying item 8e.
 - **No dark mode.** Tokens are centralised in `index.css` if it comes back.
 - **The needs-attention model ignores movepools.** A thin movepool or an
   uncovered weakness is arguably an alert; it is a sixth signal plus a weight in

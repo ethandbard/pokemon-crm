@@ -542,7 +542,7 @@ All routes are under `/api`. Responses are JSON; errors are
 | DELETE | `/api/roster/:id` | Remove a roster entry |
 | GET | `/api/roster/:id/moves` | The entry's equipped moveset, in slot order |
 | PUT | `/api/roster/:id/moves` | Replace the whole moveset (≤ 4 ids). Rejects duplicates and moves the species can't learn |
-| GET | `/api/trainers/:id/analysis` | Team analysis from **equipped** movesets — `offense`, `defense`, `gaps`, `threats`, `readiness` |
+| GET | `/api/trainers/:id/analysis` | Team analysis from **equipped** movesets — `offense`, `defense`, `gaps`, `threats`, `readiness`, plus `build` (ability/nature/item counters, which feed no other figure) |
 | GET | `/api/notes` | Cross-Pokémon feed — `search` (note body **or** Pokémon name), `pokemonId`, `owner`, `trainerId`, `sort`, `direction`, pagination. Also returns `owners` and `trainers` for the filter dropdowns |
 | POST | `/api/notes` | Create |
 | PATCH | `/api/notes/:id` | Update body |
@@ -550,7 +550,7 @@ All routes are under `/api`. Responses are JSON; errors are
 | GET | `/api/activity` | Status flags joined to their Pokémon — `search`, `kind`, `owner`, `pokemonId`, `trainerId`, `sort`, `direction`, pagination. Also returns `owners`, `trainers`, `kinds`, and unfiltered `kindCounts` |
 | POST | `/api/activity/toggle` | Toggle a flag on/off |
 | DELETE | `/api/activity/:id` | Remove one flag row |
-| GET | `/api/stats/dashboard` | Every dashboard aggregation in one round trip — `bucketSize`, plus the filters `type`, `generation`, `legendary`, `mythical`, `region`, `habitat`, `eggGroup`, `growthRate`, `minBaseStatTotal`, `maxBaseStatTotal`. Returns `scope` (filtered vs. total) |
+| GET | `/api/stats/dashboard` | Every dashboard aggregation in one round trip — `bucketSize`, plus the filters `type`, `generation`, `legendary`, `mythical`, `region`, `habitat`, `eggGroup`, `growthRate`, `ability`, `minBaseStatTotal`, `maxBaseStatTotal`. Returns `scope` (filtered vs. total) |
 
 ### Conventions
 
@@ -728,7 +728,14 @@ Consequences worth knowing:
   that it plots every point.
 - The CRM tiles are scoped too, so they answer the same question as the charts.
 - "Most widely learned moves" counts learners **within the scope** rather than
-  reading `moves.learned_by_count`, which is dex-wide.
+  reading `moves.learned_by_count`, which is dex-wide. "TMs that reach the most
+  species" does the same, and shows the **latest** TM number per move
+  (`max(version_group_order)`), since numbers are reassigned every generation.
+- The abilities breakdown unnests a `text[]`, so **a species with two abilities
+  is counted under each** — the same double count the type breakdown has, and
+  stated in the card subtitle. Hidden abilities are excluded from it; they live
+  in their own column and get a summary tile, whose hint notes that PokeAPI
+  records one for only 856 of 1,025 species.
 
 ### Type effectiveness
 
@@ -777,6 +784,21 @@ Rules the analysis follows, all in `server/src/effectiveness.ts`:
 - **`answeredBy` is not `members.length`.** The first counts members with a
   super-effective answer; the second ties on the best result even when that
   result is neutral. Charts asking "how many can answer this" want `answeredBy`.
+
+**`build` is a sibling of `readiness`, not part of it.** The analysis endpoint
+returns both. `readiness` carries the claim the Team page states out loud —
+every figure there is only as true as the movesets behind it — which is true of
+movesets and false of abilities, natures and items, none of which any figure
+reads. Folding them in would put those counters beside `withoutMoveset +
+withPartialMoveset` arithmetic they must never enter.
+
+**Three separate counters, never one "build completeness" figure.** A composite
+needs a denominator (four moves plus three fields = seven, weighted how?) and
+every weighting is an assertion this app cannot defend. It would also read as a
+team-strength score — the wrong-label problem `moveCoverage` was renamed for.
+The Team page's four readiness tiles stay as they are: that row is the page's
+honest-caveat row, and a fifth tile dilutes it. The counters sit under the
+Members table instead, where the fix is.
 
 Two dashboards, deliberately distinct: **`/team`** analyses one trainer's roster,
 **`/dashboard`** explores the whole dex. A figure about one roster belongs on the
