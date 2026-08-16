@@ -1,8 +1,8 @@
 # TODO
 
 Items 1, 2, 3a, 3c, 4, 5 and 6 are done. **Item 7 — the roster-building pivot —
-is complete** — all four phases landed. 3b's remaining bullets (varieties,
-encounters, abilities) are the next unclaimed work.
+is complete** — all four phases landed. **Item 8 is the active work**; 3b's
+remaining bullets (varieties, encounters) follow it.
 
 ---
 
@@ -75,8 +75,10 @@ HTTP, so it moved to 3b.
   *learnable* movepool would have said yes for nearly every roster.
 - **`/pokemon/{id}/encounters`** — 1,025 requests, tiny responses. Location,
   method, and rarity per game version; backs a "where does this come from" panel.
-- **`/ability/{name}`** — ~370 requests. Effect text so abilities render as prose
-  rather than slugs, plus an abilities dimension on the Dashboard.
+  **Probe coverage before designing a surface** — encounter data thins out after
+  Gen 7, so this may be a Gen 1–7 panel that has to state its own scope, as
+  `habitat` does.
+- **`/ability/{name}` — moved to item 8a.**
 
 ### ✅ 3c. Moves — DONE
 
@@ -253,6 +255,78 @@ already carried that same `(pokemon, kind)` flag.
 Not built, and argued against: making the `ATTENTION` weights editable. They
 are documented compile-time constants; moving them to runtime needs a settings
 table and turns a legible model into mutable state.
+
+---
+
+## 8. PokéAPI data, round two
+
+Four items, ordered cheapest-first so each ships independently. Each brings
+reference data (seed-only, like `moves` and `type_damage`); **8a, 8b and 8d also
+add a per-member column or table to the roster**, following the `roster_moves`
+rule — equipped rather than potential, keyed on the roster entry, legality
+enforced in the route. 8c is reference data only.
+
+### 8a. Abilities — `/ability/{name}`, ~370 requests
+
+`pokemon.abilities` and `hidden_ability` already hold names; this adds an
+`abilities` table (slug PK, name, effect, short effect, generation,
+`is_main_series`) joined on those names. Renders abilities as prose on the
+Profile instead of slugs, and gives the Dashboard an abilities dimension.
+
+Constraint: the join is name-to-name with no FK, same shape as `notes.owner` →
+`users.email` — it must tolerate a miss and fall back to the raw slug.
+
+Plus **`roster.ability`** (nullable): which ability this member actually has.
+Unlike a held item, this one has a real legality rule — it must be one of that
+species' `abilities` or its `hidden_ability` — enforced in `PATCH
+/api/roster/:id`, the way move legality is enforced in the moveset route.
+
+### 8b. Natures — `/nature`, 25 requests
+
+A `natures` table (25 rows: increased stat, decreased stat, and the neutral
+five) plus `roster.nature`, nullable. A nature is a trainer's *choice*, so it
+belongs on the roster entry, not on `pokemon`.
+
+Neutral natures (`hardy`, `docile`, …) have **null** increased/decreased stats —
+do not assume both are present.
+
+⚠️ **The ±10% is applied to base stats and labelled as such — never presented as
+an in-game battle stat.** The real formula needs IVs and EVs, which this app does
+not record and must not invent; that is the `expPerDay` mistake in a new costume.
+Readiness and team analysis do **not** read nature.
+
+### 8c. Machines — `/machine/{id}`, ~500–900 requests
+
+`pokemon_moves.learn_method = 'machine'` records that a move is TM-taught but
+not *which* TM. The `machines` array already comes free on each `/move`
+response; resolving the latest version group's entry per move yields the TM
+number and item name. Surfaces on the movepool card and move detail.
+
+Version-group recency uses the group's `order`, not its id — the same trap
+recorded in CLAUDE.md § `moves` and `pokemon_moves`.
+
+### 8d. Held items — `/item/{name}`, scoped
+
+Two halves, and only the second needs new tables:
+
+- Effect text for the held items already named in `pokemon.held_items` — a few
+  hundred distinct items, self-limiting.
+- **`roster_items`** — the item a roster member actually carries. Mirrors
+  `roster_moves`: one row per roster entry, equipped rather than potential,
+  written by one route (`PUT /api/roster/:id/item`). One item per entry, so no
+  slot mechanic.
+
+⚠️ **There is no per-species legality rule for items** — any Pokémon can hold
+any held item. The moveset route's join-constraint has no analogue here; the
+only check is that the item is holdable. Do not assume otherwise.
+
+Team analysis does **not** read items initially. An item that changes a matchup
+(Focus Sash, resist berries) means matchup logic in `effectiveness.ts`, which is
+a separate decision — coverage figures must not shift under a label that has not
+been re-argued.
+
+Do **not** import all ~2,180 items; scope the fetch to battle-relevant
+categories.
 
 ---
 
