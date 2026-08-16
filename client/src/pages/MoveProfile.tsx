@@ -61,7 +61,7 @@ export function MoveProfilePage() {
 
   if (!data) return null;
 
-  const { move, learners, methodBreakdown, typeBreakdown, trainers } = data;
+  const { move, learners, methodBreakdown, typeBreakdown, trainers, machines } = data;
   const typeData = typeBreakdown.slice(0, 10).map((row) => ({ ...row, type: titleCase(row.type) }));
 
   return (
@@ -170,6 +170,41 @@ export function MoveProfilePage() {
               </ul>
             )}
           </Card>
+
+          {/*
+            TM numbers, newest game first.
+
+            A list rather than a single "current TM" because TMs are renumbered
+            every generation — Facade has been TM42, TM12, TM39, TM25 and TM109.
+            Roughly two thirds of machine-taught moves have changed number at
+            least once, so one number would be wrong more often than right.
+          */}
+          {machines.length > 0 && (
+            <Card
+              title="Machines"
+              subtitle={
+                machines.length === 1
+                  ? 'The one game that teaches this by machine'
+                  : `${machines[0]!.tmNumber} in the latest game — the number changes between generations`
+              }
+            >
+              <ul className="space-y-1">
+                {machines.map((machine) => (
+                  <li
+                    key={machine.versionGroup}
+                    className="flex items-center justify-between gap-3 border-b border-hairline/60 py-1.5 text-sm last:border-0"
+                  >
+                    <span className="min-w-0 truncate text-muted">
+                      {slugLabel(machine.versionGroup)}
+                    </span>
+                    <span className="shrink-0 font-medium tabular-nums text-ink">
+                      {machine.tmNumber}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           {/* The CRM half — which caseloads this move is actually available on.
               Active roster only, matching every other roster figure. */}

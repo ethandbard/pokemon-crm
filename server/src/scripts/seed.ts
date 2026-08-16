@@ -43,6 +43,7 @@ import { ENGLISH, POKEAPI, fetchJson, mapWithConcurrency, type NamedRef } from '
 import { seedTypeChart } from './seed-types.js';
 import { seedAbilities } from './seed-abilities.js';
 import { seedNatures } from './seed-natures.js';
+import { seedMachines } from './seed-machines.js';
 
 interface PokemonResponse {
   id: number;
@@ -127,6 +128,14 @@ interface MoveResponse {
     healing: number | null;
   } | null;
   target: NamedRef | null;
+  /**
+   * Which machine teaches this move, per game. Comes free with this response —
+   * only resolving each `machine.url` costs a request.
+   *
+   * **Not in chronological order**: Facade lists Let's Go, then Sword/Shield,
+   * then Ruby/Sapphire. Recency comes from the version group's `order`.
+   */
+  machines?: { machine: { url: string }; version_group: NamedRef }[];
 }
 
 /** One (species, move, method) enrolment, before move ids are resolved. */
@@ -785,6 +794,7 @@ async function seedMoves(built: BuiltRow[]) {
   if (moveFailures.length) {
     console.warn(`[seed] ${moveFailures.length} moves failed: ${moveFailures.join(', ')}`);
   }
+
 }
 
 async function main() {
@@ -984,6 +994,11 @@ async function main() {
   // can be turned off.
   if (env.seedMoves) {
     await seedMoves(built);
+    if (env.seedMachines) {
+      await seedMachines();
+    } else {
+      console.log('[seed] SEED_MACHINES=false — skipping TM numbers.');
+    }
   } else {
     console.log('[seed] SEED_MOVES=false — skipping moves.');
   }

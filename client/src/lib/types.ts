@@ -140,6 +140,19 @@ export interface MoveDetailResponse {
   typeBreakdown: { type: string; count: number }[];
   /** Trainers with at least one active-roster member that learns it. */
   trainers: { trainer_id: number; trainer_name: string; learners: number; active_roster: number }[];
+  /**
+   * Every machine that has taught this move, **newest game first**. Empty for a
+   * move no machine has ever taught.
+   *
+   * One row per game, not a single current TM: numbers are reassigned every
+   * generation, and about two thirds of machine-taught moves have changed.
+   */
+  machines: {
+    versionGroup: string;
+    versionGroupOrder: number | null;
+    tmNumber: string;
+    itemSlug: string;
+  }[];
   pagination: Pagination;
 }
 
@@ -160,6 +173,15 @@ export interface MovepoolEntry {
   learnMethod: string;
   levelLearnedAt: number;
   versionGroup: string | null;
+  /**
+   * The move's most recent TM/HM/TR (`TM109`), or null if no machine has ever
+   * taught it.
+   *
+   * A property of the *move*, not of this species' way of learning it — so it
+   * can be set on a level-up row too. The movepool shows it on machine rows,
+   * where it answers "which TM".
+   */
+  tmNumber: string | null;
 }
 
 export interface MoveSummary {

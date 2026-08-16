@@ -46,6 +46,8 @@ const REFERENCE_TABLES = [
   },
   /** Fixed since Gen 3 and not going to change, so a hard target is right here. */
   { key: 'natures', label: 'Natures', expected: 25, seededBy: 'npm run seed:natures' },
+  /** One row per (move, game); the count tracks how many moves were seeded. */
+  { key: 'move_machines', label: 'TM numbers', expected: null, seededBy: 'npm run seed:machines' },
 ] as const;
 
 /**
@@ -73,7 +75,8 @@ adminRouter.get(
           (select count(*)::int from roster)          as roster,
           (select count(*)::int from roster_moves)    as roster_moves,
           (select count(*)::int from abilities)       as abilities,
-          (select count(*)::int from natures)         as natures
+          (select count(*)::int from natures)         as natures,
+          (select count(*)::int from move_machines)   as move_machines
       `)
     ).rows as unknown as Record<string, number>[];
 

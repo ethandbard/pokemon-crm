@@ -514,6 +514,48 @@ export const abilities = pgTable(
 );
 
 /**
+ * Which TM (or HM, or TR) teaches a move, per game — reference data, written
+ * only by the seed.
+ *
+ * `pokemon_moves.learn_method = 'machine'` records *that* a move is machine-taught
+ * but not *which* machine. This table answers that, and keeps **one row per
+ * (move, version group)** rather than a single current number, because TMs are
+ * renumbered every generation: Facade is TM42 in one era and TM109 in another.
+ * A single column would have to pick one and silently misdate the rest.
+ *
+ * - **`version_group_order` is stored alongside the name** because "the latest
+ *   TM" is otherwise unanswerable in SQL: PokeAPI's version-group **ids are not
+ *   chronological** (`blue-japan` is id 29, order 2), and nothing else in this
+ *   database records the ordering. `max(version_group_order)` per move is the
+ *   current TM.
+ * - `item_slug` is PokeAPI's item name (`tm109`); `tm_number` is that
+ *   uppercased (`TM109`). Keeping both means the display value needs no parsing
+ *   and the item reference stays intact for a future join to `items`.
+ * - Rows are **deleted and reinserted** for the moves the seed fetched, like
+ *   `pokemon_moves` — a machine dropped in a later game would never conflict, so
+ *   an upsert would leave it behind forever.
+ */
+export const moveMachines = pgTable(
+  'move_machines',
+  {
+    id: serial('id').primaryKey(),
+    moveId: integer('move_id')
+      .notNull()
+      .references(() => moves.id, { onDelete: 'cascade' }),
+    versionGroup: text('version_group').notNull(),
+    /** PokeAPI's `order` for that group — the only chronology available. */
+    versionGroupOrder: integer('version_group_order'),
+    /** `TM109`, `HM01`, `TR20`. Uppercased `item_slug`. */
+    tmNumber: text('tm_number').notNull(),
+    itemSlug: text('item_slug').notNull(),
+  },
+  (table) => [
+    uniqueIndex('move_machines_move_version_idx').on(table.moveId, table.versionGroup),
+    index('move_machines_move_idx').on(table.moveId),
+  ],
+);
+
+/**
  * The 25 natures, from `/nature` — reference data, written only by the seed.
  *
  * A nature raises one stat by 10% and lowers another by 10%. Three things about
@@ -758,3 +800,5 @@ export type Ability = typeof abilities.$inferSelect;
 export type NewAbility = typeof abilities.$inferInsert;
 export type Nature = typeof natures.$inferSelect;
 export type NewNature = typeof natures.$inferInsert;
+export type MoveMachine = typeof moveMachines.$inferSelect;
+export type NewMoveMachine = typeof moveMachines.$inferInsert;

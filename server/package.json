@@ -18,7 +18,8 @@
     "seed:users": "tsx src/scripts/seed-users.ts",
     "seed:types": "tsx src/scripts/seed-types.ts",
     "seed:abilities": "tsx src/scripts/seed-abilities.ts",
-    "seed:natures": "tsx src/scripts/seed-natures.ts"
+    "seed:natures": "tsx src/scripts/seed-natures.ts",
+    "seed:machines": "tsx src/scripts/seed-machines.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

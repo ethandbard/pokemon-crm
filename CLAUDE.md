@@ -72,6 +72,7 @@ pokemon-crm/
 │           ├── seed-types.ts # the 18-request type effectiveness matrix
 │           ├── seed-abilities.ts # effect text for the abilities the dex uses
 │           ├── seed-natures.ts # the 25 natures
+│           ├── seed-machines.ts # TM numbers, per move per game
 │           ├── seed-trainers.ts # demo trainers, rosters, review history
 │           └── seed-users.ts # the demo user directory
 └── client/
@@ -221,6 +222,26 @@ because PokeAPI keeps adding methods (`level-up`, `machine`, `egg`, `tutor`,
   `level-up`, 0 means "learned on evolution"**, not level zero.
 - Movepool coverage = distinct types of **non-status** moves. A Grass-type
   status move gives no Grass coverage.
+
+### `move_machines`
+
+Which TM, HM or TR teaches a move, **one row per (move, version group)** —
+2,372 rows across 358 moves. Written only by the seed (`seed:machines`).
+
+- **TMs are renumbered every generation**, which is the entire reason this is a
+  table and not two columns on `moves`. Facade has been TM42, TM12, TM39, TM25
+  and TM109; **229 of the 358 machine-taught moves (64%) changed number at least
+  once**. A single "current TM" column would be wrong more often than right.
+- **`version_group_order` is stored on the row** because "the latest TM" is
+  otherwise unanswerable in SQL — version-group **ids are not chronological**
+  (`blue-japan` is id 29, order 2) and nothing else in the database records the
+  ordering. Current TM is `order by version_group_order desc limit 1`.
+- **Seeded from the `/machine` index, not from each move's `machines` array.**
+  Both cost the same ~2,372 resolutions, but the index is one extra call and
+  needs no `/move` fetches, so `seed:machines` runs standalone against an
+  already-seeded database.
+- `item_slug` is PokeAPI's item name (`tm109`); `tm_number` is it uppercased.
+- Best-effort, not all-or-nothing: a missing row means one move shows no TM.
 
 ### `abilities`
 
@@ -468,7 +489,7 @@ All routes are under `/api`. Responses are JSON; errors are
 | GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, `abilities` with effect text, full movepool, movepool summary, defensive `matchups`, dex neighbours, BST percentile |
 | GET | `/api/moves` | Move catalogue — `search`, `type`, `damageClass`, `generation`, `pokemonId`, `trainerId`, `learnMethod`, `minPower`, `maxPower`, `sort`, `direction`, pagination |
 | GET | `/api/moves/filters` | Distinct types/generations/damage classes/learn methods/ailments and the power range |
-| GET | `/api/moves/:id` | Move + paginated learners (`learnMethod`, pagination), learn-method and type breakdowns, and trainers with an active-roster learner |
+| GET | `/api/moves/:id` | Move + paginated learners (`learnMethod`, pagination), learn-method and type breakdowns, trainers with an active-roster learner, and `machines` (every TM number, newest game first) |
 | GET | `/api/admin/overview` | Reference-table completeness, workspace counts, owner strings with no matching user, and `strandedAbilities` |
 | PATCH | `/api/admin/trainers/:id/owner` | Hand a trainer to another user. **Not** guarded by current ownership — an orphaned trainer must stay recoverable |
 | POST | `/api/admin/reassign-owner` | Move everything under one owner string to another — `includeTrainers` (default true), `includeNotes`, `includeActivity` |
@@ -866,6 +887,7 @@ walkthrough.
 Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
 18-request type chart), `npm run seed:abilities` (ability effect text for the
 slugs the seeded dex references), `npm run seed:natures` (the 25 natures),
+`npm run seed:machines` (TM numbers — ~2,400 requests, needs `moves` seeded),
 `npm run db:generate` (new migration from schema changes),
 `npm run db:push` (dev-only direct sync), `npm run db:studio`,
 `npm run typecheck`, `npm run build`.
@@ -910,6 +932,9 @@ slugs the seeded dex references), `npm run seed:natures` (the 25 natures),
 - **`SEED_ABILITIES=false` skips ability effect text** (~284 requests on a full
   dex). With it off, abilities render as their slugs with no prose — degraded,
   not broken.
+- **`SEED_MACHINES=false` skips TM numbers** (~2,400 requests — the most
+  expensive pass after the dex itself). Movepool rows still say a move is
+  machine-taught, just not which machine. Needs `moves` seeded first.
 - The local Postgres uses `trust` auth on localhost, so `.env` has no password.
   Azure needs `PGSSL=true` and `sslmode=require`.
 
@@ -922,7 +947,7 @@ slugs the seeded dex references), `npm run seed:natures` (the 25 natures),
 - **build** — `npm ci`, `typecheck`, `build`, on Node 20 (the `engines` floor)
   and 22. `fail-fast` is off.
 - **migrations** — spins up a Postgres 16 service, runs `db:create` and
-  `db:migrate` **twice each**, and asserts all thirteen tables exist. Adding a table
+  `db:migrate` **twice each**, and asserts all fourteen tables exist. Adding a table
   means adding it to that list.
 
 **CI does not seed** — that would be ~2,600 PokéAPI requests per push, against

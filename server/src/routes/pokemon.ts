@@ -2,7 +2,17 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { abilities, activity, moves, notes, pokemon, pokemonMoves, roster, trainers } from '../db/schema.js';
+import {
+  abilities,
+  activity,
+  moveMachines,
+  moves,
+  notes,
+  pokemon,
+  pokemonMoves,
+  roster,
+  trainers,
+} from '../db/schema.js';
 import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
 import { POKEMON_TYPES, REGIONS, REGION_POKEDEXES, titleCase } from '../constants.js';
 import { defensiveProfile, loadTypeChart } from '../effectiveness.js';
@@ -407,6 +417,25 @@ pokemonRouter.get(
             learnMethod: pokemonMoves.learnMethod,
             levelLearnedAt: pokemonMoves.levelLearnedAt,
             versionGroup: pokemonMoves.versionGroup,
+            /*
+             * The move's most recent TM, or null.
+             *
+             * "Most recent" is `max(version_group_order)`, not `max(id)` —
+             * PokeAPI's version-group ids are not chronological, which is why
+             * that order is stored on the row at all. Correlated subquery, so
+             * the inner table is aliased and the outer reference qualified.
+             *
+             * Not filtered to `learn_method = 'machine'`: a move can be both
+             * level-up for this species and a TM in general, and the number is
+             * true either way. The UI shows it on machine rows.
+             */
+            tmNumber: sql<string | null>`(
+              select mm.tm_number
+              from ${moveMachines} mm
+              where mm.move_id = ${moves}.id
+              order by mm.version_group_order desc nulls last, mm.id desc
+              limit 1
+            )`,
           })
           .from(pokemonMoves)
           .innerJoin(moves, eq(pokemonMoves.moveId, moves.id))

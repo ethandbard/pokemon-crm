@@ -311,6 +311,13 @@ export function Movepool({
               {active === 'level-up' && (
                 <SortableTh label="Lv" sortKey="level" sort={activeSort} onSort={toggleSort} align="right" />
               )}
+              {/* Only on the machine tab, mirroring the level column: on any
+                  other tab the number answers a question nobody asked. */}
+              {active === 'machine' && (
+                <th scope="col" className="px-3 py-2 text-left font-medium">
+                  TM
+                </th>
+              )}
               <SortableTh label="Move" sortKey="name" sort={activeSort} onSort={toggleSort} />
               <SortableTh label="Type" sortKey="type" sort={activeSort} onSort={toggleSort} />
               <SortableTh label="Class" sortKey="class" sort={activeSort} onSort={toggleSort} />
@@ -336,6 +343,14 @@ export function Movepool({
                         Evo
                       </span>
                     )}
+                  </td>
+                )}
+                {active === 'machine' && (
+                  <td className="px-3 py-1.5 tabular-nums text-muted">
+                    {/* Null when the machines import has not run. The row is
+                        still true — this move IS machine-taught — so the cell
+                        goes quiet rather than the row disappearing. */}
+                    {move.tmNumber ?? <span className="text-hairline">—</span>}
                   </td>
                 )}
                 <td className="px-3 py-1.5">

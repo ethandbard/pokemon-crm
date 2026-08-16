@@ -332,15 +332,25 @@ score by exactly 9.
 ⚠️ **`item_missing` is not here** — `roster_items` does not exist until 8d. The
 third signal and the editor's item field land with it.
 
-### 8c. Machines — `/machine/{id}`, ~500–900 requests
+### ✅ 8c. Machines — DONE
 
-`pokemon_moves.learn_method = 'machine'` records that a move is TM-taught but
-not *which* TM. The `machines` array already comes free on each `/move`
-response; resolving the latest version group's entry per move yields the TM
-number and item name. Surfaces on the movepool card and move detail.
+Migration `0012_reflective_caretaker.sql` adds `move_machines` — 2,372 rows
+across 358 moves, one per (move, game). `seed-machines.ts` imports them; the
+movepool's TM/TR tab gains a TM column and move detail gains a Machines card.
 
-Version-group recency uses the group's `order`, not its id — the same trap
-recorded in CLAUDE.md § `moves` and `pokemon_moves`.
+Three findings:
+
+- **The table was the right call by a wide margin.** 229 of 358 machine-taught
+  moves (**64%**) were renumbered at least once. Facade alone has been TM42,
+  TM12, TM39, TM25 and TM109. Two columns on `moves` would have been wrong for
+  most of the catalogue.
+- **Seeded from the `/machine` index, not each move's `machines` array.** Same
+  ~2,372 resolutions either way, but the index is one call and needs no `/move`
+  fetches — so `seed:machines` runs standalone instead of forcing a 2,600-request
+  dex re-import to reach data one list away.
+- The cost is ~2,400 requests, not the 500–900 estimated: that figure assumed
+  keeping only the latest machine per move, which the per-game history rules out.
+  `SEED_MACHINES=false` skips it.
 
 ### 8d. Held items — `/item/{name}`, scoped
 
