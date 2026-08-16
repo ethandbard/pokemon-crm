@@ -579,6 +579,23 @@ export interface ActivityListResponse {
 }
 
 /**
+ * One of the 25 natures, from `/api/natures`.
+ *
+ * **Both stat fields are null for the five neutral natures** (Hardy, Docile,
+ * Bashful, Quirky, Serious) — they raise and lower the same stat, so the effect
+ * cancels. Render those as "neutral", not as missing data.
+ *
+ * Stat names are PokeAPI slugs (`special-attack`); `NATURE_STAT_KEYS` in
+ * `lib/format.ts` maps them to the camelCase keys a Pokémon record uses.
+ */
+export interface Nature {
+  slug: string;
+  displayName: string;
+  increasedStat: string | null;
+  decreasedStat: string | null;
+}
+
+/**
  * One ability with its effect text, as `/api/pokemon/:id` returns it.
  *
  * `effect` is null when the ability import has not run — the row renders as a

@@ -13,6 +13,7 @@ import { trainersRouter } from './routes/trainers.js';
 import { rosterRouter } from './routes/roster.js';
 import { attentionRouter } from './routes/attention.js';
 import { usersRouter } from './routes/users.js';
+import { naturesRouter } from './routes/natures.js';
 import { adminRouter } from './routes/admin.js';
 
 const app = express();
@@ -37,6 +38,7 @@ app.use('/api/trainers', trainersRouter);
 app.use('/api/roster', rosterRouter);
 app.use('/api/attention', attentionRouter);
 app.use('/api/users', usersRouter);
+app.use('/api/natures', naturesRouter);
 app.use('/api/admin', adminRouter);
 
 app.use((_req, res) => {

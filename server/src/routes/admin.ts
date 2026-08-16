@@ -44,6 +44,8 @@ const REFERENCE_TABLES = [
     expected: null,
     seededBy: 'npm run seed:abilities',
   },
+  /** Fixed since Gen 3 and not going to change, so a hard target is right here. */
+  { key: 'natures', label: 'Natures', expected: 25, seededBy: 'npm run seed:natures' },
 ] as const;
 
 /**
@@ -70,7 +72,8 @@ adminRouter.get(
           (select count(*)::int from growth_rates)    as growth_rates,
           (select count(*)::int from roster)          as roster,
           (select count(*)::int from roster_moves)    as roster_moves,
-          (select count(*)::int from abilities)       as abilities
+          (select count(*)::int from abilities)       as abilities,
+          (select count(*)::int from natures)         as natures
       `)
     ).rows as unknown as Record<string, number>[];
 

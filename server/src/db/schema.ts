@@ -514,6 +514,35 @@ export const abilities = pgTable(
 );
 
 /**
+ * The 25 natures, from `/nature` — reference data, written only by the seed.
+ *
+ * A nature raises one stat by 10% and lowers another by 10%. Three things about
+ * the shape that are easy to get wrong:
+ *
+ * - **`increased_stat` and `decreased_stat` are null for the five neutral
+ *   natures** (`hardy`, `docile`, `bashful`, `quirky`, `serious`), which raise
+ *   and lower the same stat and so do nothing. Code that reads `.name` off these
+ *   without a guard crashes on Hardy.
+ * - **No nature affects HP.** The five stats in play are attack, defense,
+ *   special-attack, special-defense and speed — 5 × 5 = the 25 rows.
+ * - Stat names are PokeAPI slugs (`special-attack`), not the column names used
+ *   in `pokemon`.
+ *
+ * ⚠️ The ±10% belongs to a **base stat** here. A real in-game stat also depends
+ * on IVs, EVs and level, none of which this app records — see CLAUDE.md
+ * § Natures for where an adjusted number may and may not be displayed.
+ */
+export const natures = pgTable('natures', {
+  /** PokeAPI's nature slug (`adamant`), which is what `roster.nature` holds. */
+  slug: text('slug').primaryKey(),
+  displayName: text('display_name').notNull(),
+  /** Stat raised 10%, as a PokeAPI slug. **Null for the five neutral natures.** */
+  increasedStat: text('increased_stat'),
+  /** Stat lowered 10%. Null exactly when `increasedStat` is. */
+  decreasedStat: text('decreased_stat'),
+});
+
+/**
  * Where a roster member sits in the trainer's line-up. The advising analogue of
  * an active/inactive caseload: `retired` keeps the history without counting
  * toward the working roster.
@@ -600,6 +629,17 @@ export const roster = pgTable(
      * with no FK, so reads coalesce to the raw slug.
      */
     ability: text('ability'),
+    /**
+     * This member's nature — again a trainer's choice about one entry, not a
+     * fact about the species. Holds a slug, joined to `natures` with no FK, so
+     * reads coalesce to the raw slug.
+     *
+     * **Nothing on the server computes with this.** The ±10% is applied at the
+     * display edge, on one named member at a time; no route may return an
+     * adjusted stat, because the first one that does will end up inside an
+     * average. See CLAUDE.md § Natures.
+     */
+    nature: text('nature'),
     acquiredAt: timestamp('acquired_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -716,3 +756,5 @@ export type RosterMove = typeof rosterMoves.$inferSelect;
 export type NewRosterMove = typeof rosterMoves.$inferInsert;
 export type Ability = typeof abilities.$inferSelect;
 export type NewAbility = typeof abilities.$inferInsert;
+export type Nature = typeof natures.$inferSelect;
+export type NewNature = typeof natures.$inferInsert;

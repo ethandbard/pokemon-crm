@@ -78,6 +78,13 @@
       "when": 1786848453528,
       "tag": "0010_demonic_falcon",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786849181243,
+      "tag": "0011_lonely_hercules",
+      "breakpoints": true
     }
   ]
 }

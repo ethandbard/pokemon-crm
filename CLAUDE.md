@@ -64,12 +64,14 @@ pokemon-crm/
 │       │   ├── activity.ts   # status flag toggle + feed
 │       │   ├── stats.ts      # dashboard aggregations
 │       │   ├── users.ts      # the "acting as" directory
+│       │   ├── natures.ts    # the 25 natures, read-only
 │       │   └── admin.ts      # workspace health + owner reassignment
 │       └── scripts/
 │           ├── seed.ts       # one-time PokeAPI import (idempotent)
 │           ├── pokeapi.ts    # shared PokeAPI client: fetchJson, concurrency cap
 │           ├── seed-types.ts # the 18-request type effectiveness matrix
 │           ├── seed-abilities.ts # effect text for the abilities the dex uses
+│           ├── seed-natures.ts # the 25 natures
 │           ├── seed-trainers.ts # demo trainers, rosters, review history
 │           └── seed-users.ts # the demo user directory
 └── client/
@@ -253,6 +255,55 @@ not a fact about the species.
   `strandedAbilities`, split into `illegal` (species no longer lists it) and
   `unknown` (no `abilities` row, usually a skipped import).
 
+### `natures` and `roster.nature`
+
+The 25 natures from `/nature` (26 requests), plus which one a roster member has.
+
+- **`increased_stat` / `decreased_stat` are null for the five neutral natures**
+  (Hardy, Docile, Bashful, Quirky, Serious). They raise and lower the same stat,
+  so PokeAPI reports neither. Render them as "neutral", never as missing data,
+  and never write the same stat into both columns — that makes
+  "+10% Attack / −10% Attack" renderable, which reads as an effect.
+- **No nature affects HP.** Five stats × five = the 25 rows.
+- Stat names are PokeAPI slugs (`special-attack`); `NATURE_STAT_KEYS` in
+  `lib/format.ts` is the only bridge to the camelCase keys a Pokémon record uses.
+- **All 25 must import or nothing is written**, like the type chart and unlike
+  abilities: a partial set hides natures from a picker whose whole job is to
+  offer all of them. There is no useful degraded state.
+- Any Pokémon can have any nature, so `PATCH /api/roster/:id` only checks the
+  slug is one of the 25 — there is no per-species rule as there is for abilities.
+
+#### Where a nature-adjusted number may appear
+
+**The rule: a nature-adjusted figure may be shown only where a single named
+roster member with a recorded nature is the subject, and never inside an
+aggregate, a sort, a filter, or any surface backed by `pokemon` reference data.**
+
+The ±10% applies to a **base stat**. A real in-game stat also needs IVs, EVs and
+level, none of which this app records — inventing them is the `expPerDay`
+mistake in a new costume.
+
+| Surface | |
+|---|---|
+| Trainer dashboard `statAverages` | **No.** It averages members with and without a nature; a mean over a mixed population means two things per bar. |
+| Profile base-stat chart | **No.** Species reference data, reachable with no roster attachment. |
+| Lookup sort / filter / `minBaseStatTotal` | **No.** Incoherent on a dex table. |
+| `/team`, `/dashboard`, `/api/trainers/:id/analysis`, readiness | **No.** |
+| Roster table, one row per member | **Yes, as text** — `Adamant (+Attack / −Sp. Atk)`. |
+| The per-member build panel | **Yes, with numbers** — the one site. |
+
+**No route may return an adjusted stat.** `/api/natures` returns which stat each
+nature raises and lowers, nothing more; the arithmetic lives in
+`natureAdjustedStat` in `lib/format.ts`, at the display edge. The moment a route
+emits `attackAdjusted`, some future aggregation averages it.
+
+Copy for the one numeric site: title **"Base stats, nature-adjusted"**, subtitle
+naming the nature and stating that it is not an in-game battle stat because IVs,
+EVs and level are not recorded. Columns `Base` and `Adjusted`, `+10%` / `−10%`
+badges on the two affected rows. **A neutral nature omits the Adjusted column
+entirely** — a column of identical numbers claims something was computed. Values
+are floored, matching the games, with no note about rounding.
+
 ### `type_damage`
 
 The type effectiveness matrix, from `/type/{name}` — 18 requests, written only
@@ -434,7 +485,8 @@ All routes are under `/api`. Responses are JSON; errors are
 | PATCH | `/api/trainers/:id` | Update a trainer |
 | DELETE | `/api/trainers/:id` | Delete a trainer; cascades to their roster rows |
 | POST | `/api/trainers/:id/roster` | Add a Pokémon to that trainer's roster |
-| PATCH | `/api/roster/:id` | Update nickname/level/status/`ability`, or move the entry to another trainer. Rejects an ability the species cannot have |
+| GET | `/api/natures` | The 25 natures. Unpaginated: it backs a picker. Returns which stat each raises/lowers, **never an adjusted number** |
+| PATCH | `/api/roster/:id` | Update nickname/level/status/`ability`/`nature`, or move the entry to another trainer. Rejects an ability the species cannot have, or an unknown nature |
 | DELETE | `/api/roster/:id` | Remove a roster entry |
 | GET | `/api/roster/:id/moves` | The entry's equipped moveset, in slot order |
 | PUT | `/api/roster/:id/moves` | Replace the whole moveset (≤ 4 ids). Rejects duplicates and moves the species can't learn |
@@ -786,7 +838,8 @@ walkthrough.
 
 Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
 18-request type chart), `npm run seed:abilities` (ability effect text for the
-slugs the seeded dex references), `npm run db:generate` (new migration from schema changes),
+slugs the seeded dex references), `npm run seed:natures` (the 25 natures),
+`npm run db:generate` (new migration from schema changes),
 `npm run db:push` (dev-only direct sync), `npm run db:studio`,
 `npm run typecheck`, `npm run build`.
 
@@ -842,7 +895,7 @@ slugs the seeded dex references), `npm run db:generate` (new migration from sche
 - **build** — `npm ci`, `typecheck`, `build`, on Node 20 (the `engines` floor)
   and 22. `fail-fast` is off.
 - **migrations** — spins up a Postgres 16 service, runs `db:create` and
-  `db:migrate` **twice each**, and asserts all twelve tables exist. Adding a table
+  `db:migrate` **twice each**, and asserts all thirteen tables exist. Adding a table
   means adding it to that list.
 
 **CI does not seed** — that would be ~2,600 PokéAPI requests per push, against

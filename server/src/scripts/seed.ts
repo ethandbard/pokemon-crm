@@ -42,6 +42,7 @@ import { generationForDexNumber, generationForSlug, titleCase } from '../constan
 import { ENGLISH, POKEAPI, fetchJson, mapWithConcurrency, type NamedRef } from './pokeapi.js';
 import { seedTypeChart } from './seed-types.js';
 import { seedAbilities } from './seed-abilities.js';
+import { seedNatures } from './seed-natures.js';
 
 interface PokemonResponse {
   id: number;
@@ -974,7 +975,11 @@ async function main() {
     console.log('[seed] SEED_ABILITIES=false — skipping abilities; they will render as slugs.');
   }
 
-  // --- Sixth pass: moves ---------------------------------------------------
+  // --- Sixth pass: natures --------------------------------------------------
+  // 26 requests flat and independent of everything else, like the type chart.
+  await seedNatures();
+
+  // --- Seventh pass: moves --------------------------------------------------
   // The only pass that costs requests beyond the dex itself, which is why it
   // can be turned off.
   if (env.seedMoves) {

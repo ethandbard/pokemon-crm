@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, eq, inArray, ne } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { moves, pokemon, pokemonMoves, roster, rosterMoves, trainers } from '../db/schema.js';
+import { moves, natures, pokemon, pokemonMoves, roster, rosterMoves, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, forbidden, notFound } from '../http.js';
 import { ownerFor } from '../owner.js';
 import { titleCase } from '../constants.js';
@@ -60,6 +60,18 @@ const patchSchema = z
       .nullable()
       .optional()
       .transform((value) => (value === '' ? null : value)),
+    /**
+     * A nature slug. Checked against the `natures` table below rather than a
+     * hard-coded enum — the 25 are reference data, and duplicating them here
+     * would be a second list to keep in step with the seed.
+     */
+    nature: z
+      .string()
+      .trim()
+      .max(40)
+      .nullable()
+      .optional()
+      .transform((value) => (value === '' ? null : value)),
     /** Reassigning to another trainer — the caseload-transfer path. */
     trainerId: z.number().int().min(1).optional(),
   })
@@ -102,6 +114,22 @@ rosterRouter.patch(
         const options = [...legal].map((slug) => titleCase(String(slug))).join(', ') || 'none on record';
         throw badRequest(
           `${species?.displayName ?? 'This Pokémon'} cannot have ${titleCase(input.ability)} — its abilities are: ${options}`,
+        );
+      }
+    }
+
+    // Unlike an ability, a nature has no per-species rule — any Pokémon can have
+    // any of the 25. The only question is whether it is one of them.
+    if (input.nature) {
+      const [known] = await db
+        .select({ slug: natures.slug })
+        .from(natures)
+        .where(eq(natures.slug, input.nature))
+        .limit(1);
+
+      if (!known) {
+        throw badRequest(
+          `${titleCase(input.nature)} is not a known nature — run \`npm run seed:natures\` if the list is empty`,
         );
       }
     }

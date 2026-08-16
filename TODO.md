@@ -290,19 +290,29 @@ Three findings worth keeping:
 Still open: the abilities dimension on the Dashboard ships with the dashboards
 commit, not here.
 
-### 8b. Natures — `/nature`, 25 requests
+### ✅ 8b. Natures — DONE (data layer)
 
-A `natures` table (25 rows: increased stat, decreased stat, and the neutral
-five) plus `roster.nature`, nullable. A nature is a trainer's *choice*, so it
-belongs on the roster entry, not on `pokemon`.
+Migration `0011_lonely_hercules.sql` adds `natures` (25 rows) and
+`roster.nature`. `seed-natures.ts` imports them all-or-nothing; `GET
+/api/natures` backs the picker; `PATCH /api/roster/:id` validates the slug.
+`natureEffectLabel` and `natureAdjustedStat` in `lib/format.ts` do the
+arithmetic at the display edge.
 
-Neutral natures (`hardy`, `docile`, …) have **null** increased/decreased stats —
-do not assume both are present.
+**The display boundary is the whole point of this item** and is recorded in
+CLAUDE.md § Natures: an adjusted figure may appear only for a single named
+member, never in an aggregate, and **no route may return one**.
 
-⚠️ **The ±10% is applied to base stats and labelled as such — never presented as
-an in-game battle stat.** The real formula needs IVs and EVs, which this app does
-not record and must not invent; that is the `expPerDay` mistake in a new costume.
-Readiness and team analysis do **not** read nature.
+Two things worth keeping:
+
+- **No nature affects HP** — five stats × five = 25 rows. A UI that lays out six
+  stat rows must expect HP never to carry a badge.
+- **Neutral natures are a choice, not missing data.** Both stat columns are null
+  for the five, so they render "neutral"; writing the same stat into both would
+  make "+10% Attack / −10% Attack" renderable, which reads as an effect.
+
+The **nature-adjusted stat panel ships with the BuildEditor**, which is the only
+surface allowed to show those numbers — see the next item. Committing it here
+would have meant an unmounted component.
 
 ### 8c. Machines — `/machine/{id}`, ~500–900 requests
 
