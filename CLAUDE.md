@@ -23,7 +23,7 @@ The backlog lives in [TODO.md](TODO.md).
 | Frontend | Vite 6 + React 18 + TypeScript + Tailwind CSS v4 |
 | Charts | Recharts 2 |
 | Backend | Node + Express 4 (ESM, TypeScript via `tsx`) |
-| Database | PostgreSQL (local for dev; Azure Database for PostgreSQL in production) |
+| Database | PostgreSQL (local for dev; Postgres 16 container on the VPS in production) |
 | ORM / migrations | Drizzle ORM + drizzle-kit |
 | Validation | Zod (every request query/body is parsed before use) |
 
@@ -36,7 +36,10 @@ npm workspaces: `server` and `client`, driven from the repo root.
 ```
 pokemon-crm/
 ├── .env                      # real credentials — git-ignored
-├── .env.example              # committed template (local + Azure notes)
+├── .env.example              # committed template (local + TLS notes)
+├── config.env                # Compose env_file — git-ignored
+├── Dockerfile                # multi-stage Node 20 image; serves client/dist
+├── docker-compose.yml        # app + Postgres 16 on edge + internal
 ├── CLAUDE.md                 # this file
 ├── package.json              # workspace root; dev/build/seed scripts
 ├── server/
@@ -990,7 +993,7 @@ slugs the seeded dex references), `npm run seed:natures` (the 25 natures),
 - **`SEED_ITEMS=false` skips holdable items** (~450 requests). With it off, held
   items render as slugs and the build editor's item picker is empty.
 - The local Postgres uses `trust` auth on localhost, so `.env` has no password.
-  Azure needs `PGSSL=true` and `sslmode=require`.
+  A host that requires TLS needs `PGSSL=true` and `sslmode=require`.
 
 ---
 
@@ -1009,16 +1012,21 @@ their fair use policy. The seed is verified locally.
 
 CI needs no `.env`; the migrations job passes `DATABASE_URL` directly.
 
-## Deploying against Azure Postgres
+## Production
 
-Set `DATABASE_URL` to the Azure connection string (with `?sslmode=require`) and
-`PGSSL=true`; `db/client.ts` then connects with
-`ssl: { rejectUnauthorized: false }`, which Azure's managed Postgres requires.
-Run `npm run db:migrate` against the Azure database before the first deploy,
-then `npm run seed` once.
+Production is Docker Compose on the VPS at `pokemon-crm.ethandbard.com`.
+`docker-compose.yml` runs the Node image and Postgres 16. The app joins the
+shared `edge` network and publishes no host port. Postgres stays on `internal`.
+`config.env` is the Compose `env_file` and is git-ignored.
 
-In production the client is a static bundle (`client/dist`); serve it behind a
-proxy that forwards `/api` to the Express server.
+`NODE_ENV=production` makes `server/src/index.ts` serve `client/dist` and
+fall through non-`/api` paths to `index.html`. There is no separate proxy.
+
+Run `npm run db:migrate` (and `npm run seed` once) against the container
+database after the first deploy. The image does not migrate on start.
+
+If a managed Postgres requires TLS, set `PGSSL=true` and `sslmode=require`.
+`db/client.ts` then uses `ssl: { rejectUnauthorized: false }`.
 
 ---
 

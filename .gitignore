@@ -8,11 +8,15 @@ node_modules/
 .env.local
 .env.*.local
 !.env.example
+config.env
 
 # build output
 dist/
 build/
 *.tsbuildinfo
+
+# runtime state (local or VPS Postgres datadir)
+data/
 
 # logs
 logs/
