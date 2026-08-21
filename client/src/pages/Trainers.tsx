@@ -19,6 +19,7 @@ import type {
   TrainerListItem,
 } from '../lib/types';
 import { MovesetEditor } from '../components/MovesetEditor';
+import { BuildEditor } from '../components/BuildEditor';
 import { TrainerForm } from '../components/TrainerForm';
 import { AddRosterMember, EditRosterMember } from '../components/RosterEditor';
 import { EvolutionProgress } from '../components/EvolutionProgress';
@@ -42,6 +43,7 @@ import {
   dexNumber,
   effectivenessLabel,
   formatDate,
+  natureEffectLabel,
   titleCase,
 } from '../lib/format';
 import { PAGE_CONTAINER } from '../lib/page';
@@ -352,6 +354,7 @@ function TrainerDashboard({
   const [adding, setAdding] = useState(false);
   const [editingMember, setEditingMember] = useState<RosterMember | null>(null);
   const [editingMoveset, setEditingMoveset] = useState<RosterMember | null>(null);
+  const [editingBuild, setEditingBuild] = useState<RosterMember | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [rosterView, setRosterView] = useState<'table' | 'board'>('table');
@@ -522,6 +525,21 @@ function TrainerDashboard({
         />
       )}
 
+      {editingBuild && (
+        <BuildEditor
+          open
+          rosterId={editingBuild.id}
+          memberName={editingBuild.nickname ?? editingBuild.displayName}
+          onClose={() => setEditingBuild(null)}
+          onSaved={() => {
+            setEditingBuild(null);
+            // The dashboard carries the ability and nature columns; the
+            // analysis endpoint does not read either, so it is left alone.
+            refetch();
+          }}
+        />
+      )}
+
       {/*
         Roster size counts everyone; every other tile is computed over the
         ACTIVE roster, which is why they carry the "active roster" hint.
@@ -634,6 +652,7 @@ function TrainerDashboard({
                   onTrainerChanged();
                 }}
                 onEditMoveset={setEditingMoveset}
+                onEditBuild={setEditingBuild}
               />
             ) : (
             <div className="overflow-x-auto">
@@ -660,6 +679,9 @@ function TrainerDashboard({
                     </th>
                     <th scope="col" className="px-2 py-2 text-right font-medium">
                       Moveset
+                    </th>
+                    <th scope="col" className="px-2 py-2 text-left font-medium">
+                      Build
                     </th>
                     <th scope="col" className="px-2 py-2 text-left font-medium">
                       Progress
@@ -752,6 +774,35 @@ function TrainerDashboard({
                             {member.movesetSize === 0
                               ? `${member.moveCount} learnable`
                               : `${member.movesetCoverage} type${member.movesetCoverage === 1 ? '' : 's'}`}
+                          </span>
+                        </td>
+                        {/*
+                          Ability leads and the nature is the secondary line —
+                          the ability is the one with a legality rule and real
+                          battle effect. Neither is `text-status-critical` when
+                          unset: an empty moveset makes every team figure wrong,
+                          an unset nature makes nothing wrong.
+                        */}
+                        <td className="px-2 py-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingBuild(member)}
+                            disabled={busy || !isMine}
+                            className="text-left font-medium text-ink hover:text-brand disabled:opacity-50"
+                            title={member.ability ? 'Edit ability and nature' : 'Set an ability and nature'}
+                          >
+                            {member.abilityName ?? <span className="text-muted">Not set</span>}
+                          </button>
+                          <span className="block text-[11px] text-muted">
+                            {member.nature
+                              ? `${member.natureName} · ${natureEffectLabel(
+                                  member.natureIncreasedStat,
+                                  member.natureDecreasedStat,
+                                )}`
+                              : 'No nature'}
+                          </span>
+                          <span className="block text-[11px] text-muted">
+                            {member.heldItemName ?? 'No item'}
                           </span>
                         </td>
                         <td className="px-2 py-2">

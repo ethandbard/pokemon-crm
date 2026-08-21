@@ -140,6 +140,19 @@ export interface MoveDetailResponse {
   typeBreakdown: { type: string; count: number }[];
   /** Trainers with at least one active-roster member that learns it. */
   trainers: { trainer_id: number; trainer_name: string; learners: number; active_roster: number }[];
+  /**
+   * Every machine that has taught this move, **newest game first**. Empty for a
+   * move no machine has ever taught.
+   *
+   * One row per game, not a single current TM: numbers are reassigned every
+   * generation, and about two thirds of machine-taught moves have changed.
+   */
+  machines: {
+    versionGroup: string;
+    versionGroupOrder: number | null;
+    tmNumber: string;
+    itemSlug: string;
+  }[];
   pagination: Pagination;
 }
 
@@ -160,6 +173,15 @@ export interface MovepoolEntry {
   learnMethod: string;
   levelLearnedAt: number;
   versionGroup: string | null;
+  /**
+   * The move's most recent TM/HM/TR (`TM109`), or null if no machine has ever
+   * taught it.
+   *
+   * A property of the *move*, not of this species' way of learning it — so it
+   * can be set on a level-up row too. The movepool shows it on machine rows,
+   * where it answers "which TM".
+   */
+  tmNumber: string | null;
 }
 
 export interface MoveSummary {
@@ -208,6 +230,24 @@ export interface RosterMember {
   level: number | null;
   status: RosterStatus;
   acquiredAt: string;
+
+  /** The recorded ability slug, or null. `abilityName` falls back to the slug. */
+  ability: string | null;
+  abilityName: string | null;
+  /** The recorded nature slug, or null. */
+  nature: string | null;
+  natureName: string | null;
+  /**
+   * Which stat the nature raises and lowers, as PokeAPI slugs. **Null both when
+   * no nature is set and when it is one of the five neutral ones** — check
+   * `nature` to tell those apart.
+   */
+  natureIncreasedStat: string | null;
+  natureDecreasedStat: string | null;
+  /** The held item slug, or null. `heldItemName` falls back to the slug. */
+  heldItem: string | null;
+  heldItemName: string | null;
+
   name: string;
   displayName: string;
   generation: number;
@@ -251,15 +291,21 @@ export interface RosterMember {
 }
 
 /**
- * Why a roster member is in the queue. All four are rules over recorded facts;
+ * Why a roster member is in the queue. All six are rules over recorded facts;
  * the old `behind_pace` signal rested on an invented EXP-per-day constant and
  * was removed with it.
+ *
+ * The two build signals are the lightest in the model and **only fire once the
+ * moveset is complete** — a member with no moves is not nagged about its nature.
  */
 export type AttentionReasonCode =
   | 'moveset_missing'
   | 'moveset_incomplete'
   | 'never_reviewed'
-  | 'stale_review';
+  | 'stale_review'
+  | 'ability_missing'
+  | 'item_missing'
+  | 'nature_missing';
 
 /** Why a whole roster is flagged, independent of any one member. */
 export type RosterAlertCode = 'roster_incomplete' | 'unanswered_weakness';
@@ -446,6 +492,33 @@ export interface TrainerAnalysis {
     withoutMoveset: number;
     members: { rosterId: number; displayName: string; nickname: string | null; movesetSize: number }[];
   };
+  /**
+   * Build completeness — a **sibling** of `readiness`, not part of it.
+   *
+   * `readiness` carries the page's stated caveat: every figure on `/team` is
+   * only as true as the movesets behind it. That is true of movesets and false
+   * of these, none of which any figure reads. Three separate counters rather
+   * than one composite, which would need a denominator the app cannot defend
+   * and would read as a team-strength score.
+   */
+  build: {
+    activeMembers: number;
+    withAbility: number;
+    withNature: number;
+    withItem: number;
+    members: {
+      rosterId: number;
+      ability: string | null;
+      abilityName: string | null;
+      nature: string | null;
+      natureName: string | null;
+      /** Null both for "no nature" and for the five neutral ones. */
+      natureIncreasedStat: string | null;
+      natureDecreasedStat: string | null;
+      heldItem: string | null;
+      heldItemName: string | null;
+    }[];
+  };
 }
 
 /** One attacking type and what it does to a defender, in hundredths. */
@@ -578,6 +651,83 @@ export interface ActivityListResponse {
   pagination: Pagination;
 }
 
+/**
+ * One of the 25 natures, from `/api/natures`.
+ *
+ * **Both stat fields are null for the five neutral natures** (Hardy, Docile,
+ * Bashful, Quirky, Serious) — they raise and lower the same stat, so the effect
+ * cancels. Render those as "neutral", not as missing data.
+ *
+ * Stat names are PokeAPI slugs (`special-attack`); `NATURE_STAT_KEYS` in
+ * `lib/format.ts` maps them to the camelCase keys a Pokémon record uses.
+ */
+export interface Nature {
+  slug: string;
+  displayName: string;
+  increasedStat: string | null;
+  decreasedStat: string | null;
+}
+
+/**
+ * Everything the build editor needs for one roster member, from
+ * `GET /api/roster/:id/build`.
+ *
+ * `baseStats` are unmodified — the nature's ±10% is applied on the client, and
+ * no route returns an adjusted figure. See CLAUDE.md § Natures.
+ */
+export interface RosterBuild {
+  rosterId: number;
+  pokemonId: number;
+  displayName: string;
+  nickname: string | null;
+  ability: string | null;
+  nature: string | null;
+  /** Only what this species may legally have — hidden ability included, flagged. */
+  abilityOptions: {
+    slug: string;
+    displayName: string;
+    shortEffect: string | null;
+    isHidden: boolean;
+  }[];
+  natureOptions: Nature[];
+  /** The held item slug, or null. */
+  item: string | null;
+  /**
+   * The whole holdable catalogue (~400), **not filtered by species** — any
+   * Pokémon can hold any held item, so there is nothing to filter by. The seed
+   * already scoped this to items that can actually be held.
+   */
+  itemOptions: {
+    slug: string;
+    displayName: string;
+    category: string | null;
+    shortEffect: string | null;
+  }[];
+  baseStats: {
+    hp: number;
+    attack: number;
+    defense: number;
+    specialAttack: number;
+    specialDefense: number;
+    speed: number;
+  };
+}
+
+/**
+ * One ability with its effect text, as `/api/pokemon/:id` returns it.
+ *
+ * `effect` is null when the ability import has not run — the row renders as a
+ * name with no prose rather than disappearing, which is what the Profile showed
+ * before the `abilities` table existed.
+ */
+export interface AbilityDetail {
+  slug: string;
+  displayName: string;
+  effect: string | null;
+  shortEffect: string | null;
+  isHidden: boolean;
+}
+
 export interface PokemonProfileResponse {
   pokemon: PokemonDetail;
   notes: Note[];
@@ -592,6 +742,16 @@ export interface PokemonProfileResponse {
     level: number | null;
     status: RosterStatus;
   }[];
+  /**
+   * This species' abilities with their effect text, in slot order, hidden one
+   * last.
+   *
+   * Distinct from `pokemon.abilities`, which is the raw slug array the column
+   * holds. The join to the `abilities` table has no foreign key, so an entry
+   * whose effect text has not been imported still appears here — `displayName`
+   * falls back to the title-cased slug and `effect` is null.
+   */
+  abilities: AbilityDetail[];
   /** The full movepool, level-up moves first in level order. */
   moves: MovepoolEntry[];
   moveSummary: MoveSummary | null;
@@ -635,6 +795,8 @@ export interface DashboardResponse {
     max_base_stat_total: number;
     min_base_stat_total: number;
     median_base_stat_total: number;
+    /** Coverage is 856/1025 dex-wide — PokeAPI has none for the rest. */
+    with_hidden_ability: number;
   } | null;
   typeBreakdown: {
     type: string;
@@ -700,6 +862,27 @@ export interface DashboardResponse {
     power: number | null;
     learners: number;
   }[];
+  /**
+   * Abilities by how many species in scope have them.
+   *
+   * **A species with two abilities is counted under each**, the same double
+   * count the type breakdown has. Hidden abilities are excluded — they live in
+   * their own column, and `summary.with_hidden_ability` counts them separately.
+   */
+  abilityBreakdown: {
+    slug: string;
+    name: string;
+    species: number;
+    avg_base_stat_total: number;
+  }[];
+  /** The TMs reaching the most species in scope. `tm_number` is the latest one. */
+  topMachines: {
+    id: number;
+    display_name: string;
+    type: string;
+    tm_number: string;
+    learners: number;
+  }[];
   /** What the filter bar is currently scoping every figure above to. */
   scope: {
     filtered: number;
@@ -714,6 +897,7 @@ export interface DashboardResponse {
       habitat: string | null;
       eggGroup: string | null;
       growthRate: string | null;
+      ability: string | null;
       minBaseStatTotal: number | null;
       maxBaseStatTotal: number | null;
     };

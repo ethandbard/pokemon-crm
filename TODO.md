@@ -1,8 +1,9 @@
 # TODO
 
-Items 1, 2, 3a, 3c, 4, 5 and 6 are done. **Item 7 — the roster-building pivot —
-is complete** — all four phases landed. 3b's remaining bullets (varieties,
-encounters, abilities) are the next unclaimed work.
+Items 1, 2, 3a, 3c, 4, 5, 6 and 7 are done. **Item 8 — the second round of
+PokéAPI imports — is complete**: abilities, natures, machines and held items all
+landed, with the roster columns and dashboard figures they enable. 3b's
+remaining bullets (varieties, encounters) are the next unclaimed work.
 
 ---
 
@@ -75,8 +76,10 @@ HTTP, so it moved to 3b.
   *learnable* movepool would have said yes for nearly every roster.
 - **`/pokemon/{id}/encounters`** — 1,025 requests, tiny responses. Location,
   method, and rarity per game version; backs a "where does this come from" panel.
-- **`/ability/{name}`** — ~370 requests. Effect text so abilities render as prose
-  rather than slugs, plus an abilities dimension on the Dashboard.
+  **Probe coverage before designing a surface** — encounter data thins out after
+  Gen 7, so this may be a Gen 1–7 panel that has to state its own scope, as
+  `habitat` does.
+- **`/ability/{name}` — moved to item 8a.**
 
 ### ✅ 3c. Moves — DONE
 
@@ -256,6 +259,144 @@ table and turns a legible model into mutable state.
 
 ---
 
+## 8. PokéAPI data, round two
+
+Four items, ordered cheapest-first so each ships independently. Each brings
+reference data (seed-only, like `moves` and `type_damage`); **8a, 8b and 8d also
+add a per-member column or table to the roster**, following the `roster_moves`
+rule — equipped rather than potential, keyed on the roster entry, legality
+enforced in the route. 8c is reference data only.
+
+### ✅ 8a. Abilities — DONE
+
+Migration `0010_demonic_falcon.sql` adds `abilities` (slug PK) and
+`roster.ability`. `seed-abilities.ts` imports effect text; `PATCH
+/api/roster/:id` enforces the legality rule; `/api/pokemon/:id` returns an
+`abilities` array with effect text, rendered as a stacked block on the Profile.
+
+Three findings worth keeping:
+
+- **The dex references 284 distinct abilities, not ~370.** The rest are
+  side-game only. Sourcing the slugs from `pokemon` rather than the `/ability`
+  index made the import 23% smaller *and* made it scale with `SEED_LIMIT`, so
+  `REFERENCE_TABLES` gives the table no `expected` count — a fixed target would
+  report a healthy partial seed as incomplete.
+- **`titleCase` had to move to `constants.ts`.** The route quoting a slug back
+  in an error needed it, and it lived in `scripts/pokeapi.ts` where a route
+  should not reach. `ENGLISH` stayed there — it is PokéAPI-specific.
+- **Effect text cannot live in the Profile's reference `<dl>`**, which is
+  right-aligned short values. Abilities moved out to a stacked block; the rule
+  is now in CLAUDE.md § Frontend conventions.
+
+The abilities dimension on the Dashboard shipped separately — see 8e.
+
+### ✅ 8b. Natures — DONE (data layer)
+
+Migration `0011_lonely_hercules.sql` adds `natures` (25 rows) and
+`roster.nature`. `seed-natures.ts` imports them all-or-nothing; `GET
+/api/natures` backs the picker; `PATCH /api/roster/:id` validates the slug.
+`natureEffectLabel` and `natureAdjustedStat` in `lib/format.ts` do the
+arithmetic at the display edge.
+
+**The display boundary is the whole point of this item** and is recorded in
+CLAUDE.md § Natures: an adjusted figure may appear only for a single named
+member, never in an aggregate, and **no route may return one**.
+
+Two things worth keeping:
+
+- **No nature affects HP** — five stats × five = 25 rows. A UI that lays out six
+  stat rows must expect HP never to carry a badge.
+- **Neutral natures are a choice, not missing data.** Both stat columns are null
+  for the five, so they render "neutral"; writing the same stat into both would
+  make "+10% Attack / −10% Attack" renderable, which reads as an effect.
+
+The **nature-adjusted stat panel ships with the BuildEditor**, which is the only
+surface allowed to show those numbers — see below. Committing it here would have
+meant an unmounted component.
+
+### ✅ 8b-2. BuildEditor and the build signals — DONE
+
+`components/BuildEditor.tsx` sets a member's ability and nature, backed by
+`GET /api/roster/:id/build` (one call: current values, legal abilities, the 25
+natures, unadjusted base stats). Opens from the roster table's **Build** column,
+the kanban board, and the attention queue. Hosts the nature-adjusted stat panel.
+
+`ability_missing` (6) and `nature_missing` (3) join the attention model,
+**gated behind `movesetSize === 4`** — rationale in CLAUDE.md § Needs-attention.
+The queue's primary button became a priority chain: moves → build → review.
+
+Verified against the live queue: the two signals fired on exactly the 7 members
+with a full moveset and nowhere else, and filling a build dropped that member's
+score by exactly 9.
+
+`item_missing` (4) landed with 8d, completing the three.
+
+### ✅ 8c. Machines — DONE
+
+Migration `0012_reflective_caretaker.sql` adds `move_machines` — 2,372 rows
+across 358 moves, one per (move, game). `seed-machines.ts` imports them; the
+movepool's TM/TR tab gains a TM column and move detail gains a Machines card.
+
+Three findings:
+
+- **The table was the right call by a wide margin.** 229 of 358 machine-taught
+  moves (**64%**) were renumbered at least once. Facade alone has been TM42,
+  TM12, TM39, TM25 and TM109. Two columns on `moves` would have been wrong for
+  most of the catalogue.
+- **Seeded from the `/machine` index, not each move's `machines` array.** Same
+  ~2,372 resolutions either way, but the index is one call and needs no `/move`
+  fetches — so `seed:machines` runs standalone instead of forcing a 2,600-request
+  dex re-import to reach data one list away.
+- The cost is ~2,400 requests, not the 500–900 estimated: that figure assumed
+  keeping only the latest machine per move, which the per-game history rules out.
+  `SEED_MACHINES=false` skips it.
+
+### ✅ 8d. Held items — DONE
+
+Migration `0013_last_rogue.sql` adds `items` (403 rows) and `roster_items`.
+`seed-items.ts` imports them; `PUT /api/roster/:id/item` is the only writer; the
+BuildEditor gained its third field and `item_missing` (4) joined the attention
+model on the same full-moveset gate.
+
+Three things worth keeping:
+
+- **403 items from ~450 requests, not 2,180.** Scope is 17 battle-relevant
+  categories (17 index calls) unioned with every slug in `pokemon.held_items`.
+- **A rejected item is not reported as unknown.** Master Ball is a real item and
+  still fails the check, because it is not in the holdable scope — saying "no
+  such item" would send someone hunting a typo.
+- **Clearing an item deletes a row**, which is why this is its own PUT rather
+  than a field on `PATCH /api/roster/:id`.
+
+Still deliberately true: **team analysis does not read items**, and there is no
+per-species legality rule to build a recommendation on.
+
+### ✅ 8e. Surfacing it in aggregate — DONE
+
+`GET /api/trainers/:id/analysis` gained a **`build`** key — a sibling of
+`readiness`, not part of it — and the Team page's Members table gained Ability,
+Nature and Item columns with counters beneath it. `/api/stats/dashboard` gained
+`abilityBreakdown`, `topMachines`, an `ability` filter and a hidden-ability
+tile.
+
+Four things worth keeping:
+
+- **`build` had to be a sibling.** `readiness` carries the claim the page states
+  out loud — every figure is only as true as the movesets behind it — which is
+  false of abilities, natures and items. The four readiness tiles were left
+  alone for the same reason; the counters went under the Members table.
+- **No composite "build completeness" figure**, deliberately. Four moves plus
+  three fields has no defensible denominator, and the number would read as a
+  team-strength score.
+- **The four new left joins did not fan out the grouped analysis query** —
+  verified: still six members, `readiness` and `threats` unchanged.
+- **The Dashboard's filters are local state, not URL-synced**, so
+  `/dashboard?type=fire` does nothing. Pre-existing, and worth fixing given
+  `scope.filters` is echoed back specifically to make a linked dashboard
+  self-describing.
+
+---
+
 ## Known gaps (not yet scheduled)
 
 - **No tests.** CI runs typecheck, build, and a migrations smoke test
@@ -263,14 +404,19 @@ table and turns a legible model into mutable state.
   first suite: the aggregation endpoints (`/api/stats/dashboard`,
   `/api/trainers/:id`, `/api/attention`, `/api/moves/:id`) asserted against a
   known seeded fixture.
-- **No authentication.** The `users` table and "acting as" switcher attribute
-  writes but verify nothing — the acting user is a header the client sets. Real
-  auth means sessions and a check in `ownerFor`. **Item 7d now leans on this**:
-  trainer ownership scopes reads and 403s writes, which is real behaviour built
-  on an unverified claim. Auth is the one gap that turns a convention into a
-  guarantee.
-- **Single ~720 kB JS chunk.** Route-level `React.lazy` would split Recharts out
+- **No app-level authentication.** Cloudflare Access gates
+  `pokemon-crm.ethandbard.com` (one-time PIN). Inside the app, the `users`
+  table and "acting as" switcher still attribute writes but verify nothing —
+  the acting user is a header the client sets. Real in-app auth means sessions
+  and a check in `ownerFor`. **Item 7d now leans on this**: trainer ownership
+  scopes reads and 403s writes, which is real behaviour built on an unverified
+  claim. Access stops strangers; it does not make the switcher a login.
+- **Single ~770 kB JS chunk.** Route-level `React.lazy` would split Recharts out
   of the pages that don't chart.
+- **The Performance Dashboard's filters live in React state, not the URL.** The
+  API echoes `scope.filters` back precisely so a linked dashboard is
+  self-describing, but the page never reads them, so `/dashboard?type=fire` is
+  ignored. Found while verifying item 8e.
 - **No dark mode.** Tokens are centralised in `index.css` if it comes back.
 - **The needs-attention model ignores movepools.** A thin movepool or an
   uncovered weakness is arguably an alert; it is a sixth signal plus a weight in

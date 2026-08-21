@@ -1,6 +1,14 @@
 import { sql, type SQL } from 'drizzle-orm';
 import { db } from './db/client.js';
-import { activity, moves, pokemon, roster, rosterMoves, trainers } from './db/schema.js';
+import {
+  activity,
+  moves,
+  pokemon,
+  roster,
+  rosterItems,
+  rosterMoves,
+  trainers,
+} from './db/schema.js';
 import { ATTENTION, type AttentionReasonCode, type RosterAlertCode } from './constants.js';
 import {
   loadTypeChart,
@@ -38,6 +46,12 @@ interface AttentionFacts {
   daysSinceReview: number | null;
   /** Filled move slots, 0–4. The readiness signal. */
   movesetSize: number;
+  /** The recorded ability slug, or null. Scored only once the moveset is full. */
+  ability: string | null;
+  /** The recorded nature slug, or null. Same gate. */
+  nature: string | null;
+  /** The held item slug, or null. Same gate. */
+  heldItem: string | null;
 }
 
 export interface AttentionReason {
@@ -79,6 +93,41 @@ export function scoreFacts(facts: AttentionFacts): AttentionItem {
       points: round(empty * ATTENTION.movesetIncompletePerSlot),
       label: `${facts.movesetSize} of 4 moves set`,
     });
+  }
+
+  /*
+   * Build detail, and only once the moveset is finished.
+   *
+   * The gate is the point. These are the smallest signals in the model and
+   * nothing seeds them, so ungated they would fire on every member of a fresh
+   * database alongside `moveset_missing` — three chips on every row, which is
+   * the roster wearing a queue's clothing. Gated, the queue reads as a
+   * progression: get the moves in, then finish the build.
+   *
+   * Drop `movesetSize === 4` from this condition to ungate them.
+   */
+  if (facts.movesetSize === 4) {
+    if (!facts.ability) {
+      reasons.push({
+        code: 'ability_missing',
+        points: ATTENTION.abilityMissing,
+        label: 'No ability recorded',
+      });
+    }
+    if (!facts.heldItem) {
+      reasons.push({
+        code: 'item_missing',
+        points: ATTENTION.itemMissing,
+        label: 'No held item',
+      });
+    }
+    if (!facts.nature) {
+      reasons.push({
+        code: 'nature_missing',
+        points: ATTENTION.natureMissing,
+        label: 'No nature recorded',
+      });
+    }
   }
 
   if (facts.daysSinceReview === null) {
@@ -137,7 +186,19 @@ async function loadFacts(trainerId?: number, scope?: SQL): Promise<AttentionFact
       -- so two trainers carrying the same species are judged separately.
       (
         select count(*)::int from ${rosterMoves} rm where rm.roster_id = r.id
-      )                                                      as "movesetSize"
+      )                                                      as "movesetSize",
+
+      -- Build detail. Plain columns, not joins: the scorer only asks whether
+      -- they are set, and resolving a display name here would be work the
+      -- queue never uses.
+      r.ability                                              as "ability",
+      r.nature                                               as "nature",
+
+      -- Correlated subquery, so the inner table is aliased and the outer
+      -- reference qualified: roster_items has its own roster_id column.
+      (
+        select ri.item_slug from ${rosterItems} ri where ri.roster_id = r.id
+      )                                                      as "heldItem"
 
     from ${roster} r
     join ${pokemon} p on p.id = r.pokemon_id

@@ -62,4 +62,24 @@ export const env = {
    * faster run; the moves pages then render their empty states.
    */
   seedMoves: (process.env.SEED_MOVES ?? 'true').toLowerCase() !== 'false',
+  /**
+   * Whether the seed imports ability effect text — one request per distinct
+   * ability the seeded dex references, ~370 for the full dex. With it off,
+   * abilities render as slugs, which is what they did before the table existed.
+   */
+  seedAbilities: (process.env.SEED_ABILITIES ?? 'true').toLowerCase() !== 'false',
+  /**
+   * Whether the seed resolves TM numbers. One request per (move, version group)
+   * — ~2,400 for the full dex, the single most expensive pass after the dex
+   * itself. Requires SEED_MOVES. With it off, movepool rows still say a move is
+   * machine-taught, just not which machine.
+   */
+  seedMachines: (process.env.SEED_MACHINES ?? 'true').toLowerCase() !== 'false',
+  /**
+   * Whether the seed imports holdable items — ~450 requests, scoped to the
+   * battle-relevant categories plus what `pokemon.held_items` references. With
+   * it off, held items render as slugs and the build editor's item picker is
+   * empty.
+   */
+  seedItems: (process.env.SEED_ITEMS ?? 'true').toLowerCase() !== 'false',
 } as const;

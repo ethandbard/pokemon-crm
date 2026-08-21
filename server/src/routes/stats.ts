@@ -2,7 +2,15 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, eq, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { activity, moves, notes, pokemon, pokemonMoves } from '../db/schema.js';
+import {
+  abilities,
+  activity,
+  moveMachines,
+  moves,
+  notes,
+  pokemon,
+  pokemonMoves,
+} from '../db/schema.js';
 import { asyncHandler } from '../http.js';
 import { POKEMON_TYPES, REGIONS, REGION_POKEDEXES } from '../constants.js';
 
@@ -23,6 +31,7 @@ const dashboardQuerySchema = z.object({
   habitat: z.string().trim().max(40).optional(),
   eggGroup: z.string().trim().max(40).optional(),
   growthRate: z.string().trim().max(40).optional(),
+  ability: z.string().trim().max(60).optional(),
   minBaseStatTotal: z.coerce.number().int().min(0).max(1200).optional(),
   maxBaseStatTotal: z.coerce.number().int().min(0).max(1200).optional(),
 });
@@ -44,6 +53,9 @@ function scopeFilters(query: DashboardQuery): SQL[] {
   if (query.habitat) filters.push(eq(pokemon.habitat, query.habitat));
   if (query.growthRate) filters.push(eq(pokemon.growthRate, query.growthRate));
   if (query.eggGroup) filters.push(sql`${query.eggGroup} = any(${pokemon.eggGroups})`);
+  // Ordinary abilities only, matching the breakdown — `abilities` excludes the
+  // hidden one, which lives in its own column.
+  if (query.ability) filters.push(sql`${query.ability} = any(${pokemon.abilities})`);
   if (query.minBaseStatTotal !== undefined) {
     filters.push(sql`${pokemon.baseStatTotal} >= ${query.minBaseStatTotal}`);
   }
@@ -111,6 +123,8 @@ statsRouter.get(
       moveClassBreakdown,
       movepoolStats,
       topMoves,
+      abilityBreakdown,
+      topMachines,
     ] = await Promise.all([
       db.execute<{
         total: number;
@@ -120,11 +134,13 @@ statsRouter.get(
         max_base_stat_total: number;
         min_base_stat_total: number;
         median_base_stat_total: number;
+        with_hidden_ability: number;
       }>(sql`
           select
             count(*)::int                                                        as total,
             count(*) filter (where is_legendary)::int                            as legendary,
             count(*) filter (where is_mythical)::int                             as mythical,
+            count(*) filter (where hidden_ability is not null)::int              as with_hidden_ability,
             coalesce(round(avg(base_stat_total))::int, 0)                        as avg_base_stat_total,
             coalesce(max(base_stat_total)::int, 0)                               as max_base_stat_total,
             coalesce(min(base_stat_total)::int, 0)                               as min_base_stat_total,
@@ -422,6 +438,69 @@ statsRouter.get(
           order by learners desc, m.display_name asc
           limit 12
         `),
+
+      /*
+       * Abilities by how many species in scope have them.
+       *
+       * `abilities` is a text[], so this unnests like the egg-group breakdown —
+       * which means **a species with two abilities is counted under each**, the
+       * same double count the type breakdown has. The card subtitle says so.
+       *
+       * Hidden abilities are excluded because they live in their own column, not
+       * in this array; the summary carries a separate count for them.
+       */
+      db.execute<{ slug: string; name: string; species: number; avg_base_stat_total: number }>(sql`
+          select
+            a                                              as slug,
+            coalesce(ab.display_name, initcap(replace(a, '-', ' '))) as name,
+            count(*)::int                                  as species,
+            coalesce(round(avg(pokemon.base_stat_total))::int, 0) as avg_base_stat_total
+          from ${scope}, unnest(pokemon.abilities) as a
+          left join ${abilities} ab on ab.slug = a
+          group by a, ab.display_name
+          order by species desc, a asc
+          limit 15
+        `),
+
+      /*
+       * The TMs that reach the most species in scope — a shopping list, which
+       * `topMoves` cannot answer because it does not distinguish how a move is
+       * obtained.
+       *
+       * `learners` is counted within the scope, not read off
+       * `moves.learned_by_count`, for the same reason as `topMoves`.
+       *
+       * The TM number is the latest one: numbers are reassigned every
+       * generation, so it comes from `max(version_group_order)` rather than any
+       * arbitrary row — see CLAUDE.md § move_machines.
+       */
+      db.execute<{
+        id: number;
+        display_name: string;
+        type: string;
+        tm_number: string;
+        learners: number;
+      }>(sql`
+          select
+            m.id                            as id,
+            m.display_name                  as display_name,
+            m.type                          as type,
+            (
+              select mm.tm_number
+              from ${moveMachines} mm
+              where mm.move_id = m.id
+              order by mm.version_group_order desc nulls last, mm.id desc
+              limit 1
+            )                               as tm_number,
+            count(distinct pokemon.id)::int as learners
+          from ${scope}
+          join ${pokemonMoves} pm on pm.pokemon_id = pokemon.id and pm.learn_method = 'machine'
+          join ${moves} m on m.id = pm.move_id
+          where exists (select 1 from ${moveMachines} mm where mm.move_id = m.id)
+          group by m.id, m.display_name, m.type
+          order by learners desc, m.display_name asc
+          limit 10
+        `),
     ]);
 
     // Denominator for "231 of 1,025 species" — the unfiltered count, so the UI
@@ -455,6 +534,8 @@ statsRouter.get(
       moveClassBreakdown: moveClassBreakdown.rows,
       movepool: movepoolStats.rows[0] ?? null,
       topMoves: topMoves.rows,
+      abilityBreakdown: abilityBreakdown.rows,
+      topMachines: topMachines.rows,
       scope: {
         filtered: summary.rows[0]?.total ?? 0,
         total: datasetTotal?.count ?? 0,
@@ -470,6 +551,7 @@ statsRouter.get(
           habitat: query.habitat ?? null,
           eggGroup: query.eggGroup ?? null,
           growthRate: query.growthRate ?? null,
+          ability: query.ability ?? null,
           minBaseStatTotal: query.minBaseStatTotal ?? null,
           maxBaseStatTotal: query.maxBaseStatTotal ?? null,
         },

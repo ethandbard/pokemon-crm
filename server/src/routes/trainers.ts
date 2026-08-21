@@ -3,12 +3,16 @@ import { z } from 'zod';
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
+  abilities,
   activity,
+  items,
   moves,
+  natures,
   notes,
   pokemon,
   pokemonMoves,
   roster,
+  rosterItems,
   rosterMoves,
   trainers,
 } from '../db/schema.js';
@@ -328,6 +332,34 @@ trainersRouter.get(
             level: roster.level,
             status: roster.status,
             acquiredAt: roster.acquiredAt,
+
+            // --- Build: the per-member choices --------------------------------
+            // Resolved to display names here so the roster table needs no second
+            // source. Both joins are LEFT and both names coalesce to the raw
+            // slug: neither column has a foreign key, so a missing reference row
+            // must degrade to the slug rather than blank the cell.
+            ability: roster.ability,
+            abilityName: sql<string | null>`coalesce(${abilities.displayName}, ${roster.ability})`,
+            nature: roster.nature,
+            natureName: sql<string | null>`coalesce(${natures.displayName}, ${roster.nature})`,
+            /** Null both for "no nature" and for the five neutral ones. */
+            natureIncreasedStat: natures.increasedStat,
+            natureDecreasedStat: natures.decreasedStat,
+            /*
+             * The held item, via a correlated subquery rather than a third left
+             * join: `roster_items` has its own `roster_id`, so the outer
+             * reference must be qualified (CLAUDE.md § API conventions).
+             */
+            heldItem: sql<string | null>`(
+              select ri.item_slug from ${rosterItems} ri where ri.roster_id = ${roster}.id
+            )`,
+            heldItemName: sql<string | null>`(
+              select coalesce(it.display_name, ri.item_slug)
+              from ${rosterItems} ri
+              left join ${items} it on it.slug = ri.item_slug
+              where ri.roster_id = ${roster}.id
+            )`,
+
             name: pokemon.name,
             displayName: pokemon.displayName,
             generation: pokemon.generation,
@@ -418,6 +450,10 @@ trainersRouter.get(
           })
           .from(roster)
           .innerJoin(pokemon, eq(roster.pokemonId, pokemon.id))
+          // Both LEFT: an unset ability or nature is the normal case, and a set
+          // one whose reference row is missing must still yield its slug.
+          .leftJoin(abilities, eq(abilities.slug, roster.ability))
+          .leftJoin(natures, eq(natures.slug, roster.nature))
           .where(eq(roster.trainerId, id))
           // Starters first, then the rest of the working roster, retired last.
           .orderBy(
@@ -673,6 +709,15 @@ interface AnalysisRow {
   type2: string | null;
   movesetSize: number;
   equippedMoveTypes: string[];
+  /** Build detail. Reported, never computed with — see the `build` key below. */
+  ability: string | null;
+  abilityName: string | null;
+  nature: string | null;
+  natureName: string | null;
+  natureIncreasedStat: string | null;
+  natureDecreasedStat: string | null;
+  heldItem: string | null;
+  heldItemName: string | null;
 }
 
 /**
@@ -710,13 +755,32 @@ trainersRouter.get(
         coalesce(
           array_agg(distinct m.type) filter (where m.damage_class <> 'status'),
           '{}'
-        )                                                as "equippedMoveTypes"
+        )                                                as "equippedMoveTypes",
+
+        -- Build detail. All four joins are LEFT and both names coalesce to the
+        -- raw slug: none of these columns has a foreign key, so a missing
+        -- reference row must degrade to the slug rather than blank the cell.
+        -- None of it feeds offence, defence, gaps or threats.
+        r.ability                                        as "ability",
+        coalesce(ab.display_name, r.ability)             as "abilityName",
+        r.nature                                         as "nature",
+        coalesce(n.display_name, r.nature)               as "natureName",
+        n.increased_stat                                 as "natureIncreasedStat",
+        n.decreased_stat                                 as "natureDecreasedStat",
+        ri.item_slug                                     as "heldItem",
+        coalesce(it.display_name, ri.item_slug)          as "heldItemName"
       from ${roster} r
       join ${pokemon} p on p.id = r.pokemon_id
       left join ${rosterMoves} rm on rm.roster_id = r.id
       left join ${moves} m on m.id = rm.move_id
+      left join ${abilities} ab on ab.slug = r.ability
+      left join ${natures} n on n.slug = r.nature
+      left join ${rosterItems} ri on ri.roster_id = r.id
+      left join ${items} it on it.slug = ri.item_slug
       where r.trainer_id = ${id} and r.status <> 'retired'
-      group by r.id, p.display_name, r.nickname, p.type1, p.type2
+      group by r.id, p.display_name, r.nickname, p.type1, p.type2,
+               r.ability, ab.display_name, r.nature, n.display_name,
+               n.increased_stat, n.decreased_stat, ri.item_slug, it.display_name
       order by p.display_name
     `);
 
@@ -755,6 +819,40 @@ trainersRouter.get(
           displayName: m.displayName,
           nickname: m.nickname,
           movesetSize: m.movesetSize,
+        })),
+      },
+
+      /*
+       * Build completeness — a SIBLING of `readiness`, deliberately not part of
+       * it.
+       *
+       * `readiness` carries a claim the Team page states out loud: every figure
+       * on that page is only as true as the movesets behind it. That is true of
+       * movesets and false of abilities, natures and items, none of which any
+       * figure here reads. Folding these counters in would put them beside
+       * `withoutMoveset + withPartialMoveset` arithmetic they must never enter.
+       *
+       * Three separate counters rather than one "build completeness" figure: a
+       * composite needs a denominator (four moves plus three fields = seven,
+       * weighted how?) and every weighting is an assertion this app cannot
+       * defend. It would also read as a team-strength score, which is the
+       * wrong-label problem `moveCoverage` had to be renamed for.
+       */
+      build: {
+        activeMembers: members.length,
+        withAbility: members.filter((m) => m.ability).length,
+        withNature: members.filter((m) => m.nature).length,
+        withItem: members.filter((m) => m.heldItem).length,
+        members: members.map((m) => ({
+          rosterId: m.rosterId,
+          ability: m.ability,
+          abilityName: m.abilityName,
+          nature: m.nature,
+          natureName: m.natureName,
+          natureIncreasedStat: m.natureIncreasedStat,
+          natureDecreasedStat: m.natureDecreasedStat,
+          heldItem: m.heldItem,
+          heldItemName: m.heldItemName,
         })),
       },
     });

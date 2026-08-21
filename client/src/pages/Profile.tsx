@@ -140,8 +140,18 @@ export function ProfilePage() {
 
   if (!data) return null;
 
-  const { pokemon, notes, activity, neighbours, ranking, trainers, evolution, moveSummary, matchups } =
-    data;
+  const {
+    pokemon,
+    notes,
+    activity,
+    neighbours,
+    ranking,
+    trainers,
+    evolution,
+    moveSummary,
+    matchups,
+    abilities,
+  } = data;
 
   // "as Fire / Flying" — the matchups follow from the type combination, so the
   // card names it rather than making the reader look back up the page.
@@ -374,24 +384,6 @@ export function ProfilePage() {
                 </dd>
               </div>
 
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted">Abilities</dt>
-                <dd className="text-right text-ink">
-                  {pokemon.abilities.length ? pokemon.abilities.map(slugLabel).join(', ') : '—'}
-                  {/* The hidden ability is called out rather than folded into
-                      the list — it isn't obtainable the same way, and the flag
-                      can't be recovered without a re-seed. */}
-                  {pokemon.hiddenAbility && (
-                    <span className="mt-1 block text-xs text-muted">
-                      {slugLabel(pokemon.hiddenAbility)}{' '}
-                      <span className="rounded-full border border-hairline px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide">
-                        Hidden
-                      </span>
-                    </span>
-                  )}
-                </dd>
-              </div>
-
               {pokemon.heldItems.length > 0 && (
                 <div className="flex justify-between gap-4">
                   <dt className="text-muted">Held items</dt>
@@ -401,6 +393,45 @@ export function ProfilePage() {
                 </div>
               )}
             </dl>
+
+            {/*
+              Abilities sit outside the definition list above because they carry
+              prose. Every row there is a short right-aligned value; an effect
+              sentence right-aligned against a label is unreadable, so these
+              stack instead — name, then the effect beneath it.
+            */}
+            <div className="mt-5 border-t border-hairline pt-4">
+              <h3 className="text-sm text-muted">Abilities</h3>
+              {abilities.length === 0 ? (
+                <p className="mt-2 text-sm text-ink">—</p>
+              ) : (
+                <ul className="mt-2 space-y-3">
+                  {abilities.map((ability) => (
+                    <li key={ability.slug}>
+                      <p className="text-sm font-medium text-ink">
+                        {ability.displayName}
+                        {/* The hidden ability is called out rather than folded
+                            into the list — it isn't obtainable the same way, and
+                            the flag can't be recovered without a re-seed. */}
+                        {ability.isHidden && (
+                          <span className="ml-2 rounded-full border border-hairline px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
+                            Hidden
+                          </span>
+                        )}
+                      </p>
+                      {/* Null when the ability import hasn't run. The name still
+                          renders, which is what this card showed before the
+                          abilities table existed. */}
+                      {(ability.shortEffect ?? ability.effect) && (
+                        <p className="mt-0.5 text-xs leading-relaxed text-muted">
+                          {ability.shortEffect ?? ability.effect}
+                        </p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </Card>
 
           <Card

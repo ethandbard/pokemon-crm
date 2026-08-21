@@ -23,7 +23,7 @@ The backlog lives in [TODO.md](TODO.md).
 | Frontend | Vite 6 + React 18 + TypeScript + Tailwind CSS v4 |
 | Charts | Recharts 2 |
 | Backend | Node + Express 4 (ESM, TypeScript via `tsx`) |
-| Database | PostgreSQL (local for dev; Azure Database for PostgreSQL in production) |
+| Database | PostgreSQL (local for dev; Postgres 16 container on the VPS in production) |
 | ORM / migrations | Drizzle ORM + drizzle-kit |
 | Validation | Zod (every request query/body is parsed before use) |
 
@@ -36,7 +36,10 @@ npm workspaces: `server` and `client`, driven from the repo root.
 ```
 pokemon-crm/
 ├── .env                      # real credentials — git-ignored
-├── .env.example              # committed template (local + Azure notes)
+├── .env.example              # committed template (local + TLS notes)
+├── config.env                # Compose env_file — git-ignored
+├── Dockerfile                # multi-stage Node 20 image; serves client/dist
+├── docker-compose.yml        # app + Postgres 16 on edge + internal
 ├── CLAUDE.md                 # this file
 ├── package.json              # workspace root; dev/build/seed scripts
 ├── server/
@@ -64,11 +67,16 @@ pokemon-crm/
 │       │   ├── activity.ts   # status flag toggle + feed
 │       │   ├── stats.ts      # dashboard aggregations
 │       │   ├── users.ts      # the "acting as" directory
+│       │   ├── natures.ts    # the 25 natures, read-only
 │       │   └── admin.ts      # workspace health + owner reassignment
 │       └── scripts/
 │           ├── seed.ts       # one-time PokeAPI import (idempotent)
 │           ├── pokeapi.ts    # shared PokeAPI client: fetchJson, concurrency cap
 │           ├── seed-types.ts # the 18-request type effectiveness matrix
+│           ├── seed-abilities.ts # effect text for the abilities the dex uses
+│           ├── seed-natures.ts # the 25 natures
+│           ├── seed-machines.ts # TM numbers, per move per game
+│           ├── seed-items.ts   # holdable items, scoped to battle categories
 │           ├── seed-trainers.ts # demo trainers, rosters, review history
 │           └── seed-users.ts # the demo user directory
 └── client/
@@ -86,6 +94,7 @@ pokemon-crm/
         │   ├── TrainerForm.tsx        # create/edit a trainer
         │   ├── RosterEditor.tsx       # add / edit / transfer roster entries
         │   ├── MovesetEditor.tsx      # the four equipped moves, from the movepool
+        │   ├── BuildEditor.tsx        # a member's ability and nature
         │   ├── EvolutionProgress.tsx  # stage bar + full chain view
         │   ├── Movepool.tsx   # movepool by learn method, sortable + filterable
         │   ├── AttentionQueue.tsx     # ranked early-alert list with reasons
@@ -217,6 +226,136 @@ because PokeAPI keeps adding methods (`level-up`, `machine`, `egg`, `tutor`,
   `level-up`, 0 means "learned on evolution"**, not level zero.
 - Movepool coverage = distinct types of **non-status** moves. A Grass-type
   status move gives no Grass coverage.
+
+### `items` and `roster_items`
+
+Holdable items, and which one a roster member carries.
+
+- **Scoped, not the full catalogue.** The seed imports 17 battle-relevant
+  categories (`held-items`, `choice`, `type-enhancement`, plates, berries that
+  fire in battle, …) plus every slug in `pokemon.held_items` — **403 rows from
+  ~450 requests**, against ~2,180 for every item. Poké Balls, mail and curry
+  ingredients are not carried into a fight, and importing them would put 1,700
+  rows in a picker to reach three of them.
+- ⚠️ **There is no per-species legality rule, unlike abilities and moves.** Any
+  Pokémon can hold any held item. `PUT /api/roster/:id/item` checks only that
+  the slug is a known item. Do not add a species constraint expecting one, and
+  **do not build a "recommended item" affordance** — with no rule to derive one
+  from, any recommendation would be invented, which is `expPerDay` again.
+- A rejected item is **not** reported as unknown: a real but non-battle item
+  (Master Ball) fails the same check, and "no such item" would send someone
+  hunting a typo.
+- **One item per member**, so `roster_items` is unique on `roster_id` with no
+  slot column — the four-slot mechanic `roster_moves` needs has no analogue.
+  Clearing an item deletes the row rather than nulling a column, which is why
+  this is a PUT of its own and not a field on `PATCH /api/roster/:id`.
+- Team analysis does **not** read items. An item that changes a matchup (Focus
+  Sash, resist berries) would mean matchup logic in `effectiveness.ts` — a
+  separate decision, so coverage figures do not shift under a label nobody
+  re-argued.
+
+### `move_machines`
+
+Which TM, HM or TR teaches a move, **one row per (move, version group)** —
+2,372 rows across 358 moves. Written only by the seed (`seed:machines`).
+
+- **TMs are renumbered every generation**, which is the entire reason this is a
+  table and not two columns on `moves`. Facade has been TM42, TM12, TM39, TM25
+  and TM109; **229 of the 358 machine-taught moves (64%) changed number at least
+  once**. A single "current TM" column would be wrong more often than right.
+- **`version_group_order` is stored on the row** because "the latest TM" is
+  otherwise unanswerable in SQL — version-group **ids are not chronological**
+  (`blue-japan` is id 29, order 2) and nothing else in the database records the
+  ordering. Current TM is `order by version_group_order desc limit 1`.
+- **Seeded from the `/machine` index, not from each move's `machines` array.**
+  Both cost the same ~2,372 resolutions, but the index is one extra call and
+  needs no `/move` fetches, so `seed:machines` runs standalone against an
+  already-seeded database.
+- `item_slug` is PokeAPI's item name (`tm109`); `tm_number` is it uppercased.
+- Best-effort, not all-or-nothing: a missing row means one move shows no TM.
+
+### `abilities`
+
+Ability effect text from `/ability/{name}`, written only by the seed
+(`seed:abilities` refreshes it alone; `seed` runs it as a pass, skippable with
+`SEED_ABILITIES=false`).
+
+- **Keyed by slug, joined slug-to-slug with no foreign key** — the same
+  arrangement as `notes.owner` → `users.email`. `pokemon.abilities` and
+  `pokemon.hidden_ability` predate this table, so every read must tolerate a miss
+  and fall back to the title-cased slug rather than dropping the ability.
+- **The slugs to fetch come from `pokemon`, not from the `/ability` index.** A
+  `SEED_LIMIT=151` run then fetches only Kanto's abilities. The full dex
+  references **284** distinct abilities, not PokeAPI's ~370 — the rest are
+  side-game only, which is why `REFERENCE_TABLES` gives this table no `expected`
+  count.
+- **Not all-or-nothing, unlike the type chart.** A missing row renders as a slug,
+  which is what the Profile showed before this table existed; a missing type-chart
+  row would instead read as a plausible wrong answer.
+
+### `roster.ability`
+
+Which ability a roster member actually has — a trainer's choice about one entry,
+not a fact about the species.
+
+- **Legality is enforced in the route, not the schema**, like `roster_moves`: the
+  value must appear in that species' `abilities` or equal its `hidden_ability`, a
+  constraint against another row's array. `PATCH /api/roster/:id` checks it.
+- Only the value being *set* is validated. A transfer moves an entry between
+  trainers, never between species, so a stored ability stays legal across one.
+- The check is point-in-time: a re-seed can rewrite `pokemon.abilities` and
+  strand a value. `GET /api/admin/overview` reports those as
+  `strandedAbilities`, split into `illegal` (species no longer lists it) and
+  `unknown` (no `abilities` row, usually a skipped import).
+
+### `natures` and `roster.nature`
+
+The 25 natures from `/nature` (26 requests), plus which one a roster member has.
+
+- **`increased_stat` / `decreased_stat` are null for the five neutral natures**
+  (Hardy, Docile, Bashful, Quirky, Serious). They raise and lower the same stat,
+  so PokeAPI reports neither. Render them as "neutral", never as missing data,
+  and never write the same stat into both columns — that makes
+  "+10% Attack / −10% Attack" renderable, which reads as an effect.
+- **No nature affects HP.** Five stats × five = the 25 rows.
+- Stat names are PokeAPI slugs (`special-attack`); `NATURE_STAT_KEYS` in
+  `lib/format.ts` is the only bridge to the camelCase keys a Pokémon record uses.
+- **All 25 must import or nothing is written**, like the type chart and unlike
+  abilities: a partial set hides natures from a picker whose whole job is to
+  offer all of them. There is no useful degraded state.
+- Any Pokémon can have any nature, so `PATCH /api/roster/:id` only checks the
+  slug is one of the 25 — there is no per-species rule as there is for abilities.
+
+#### Where a nature-adjusted number may appear
+
+**The rule: a nature-adjusted figure may be shown only where a single named
+roster member with a recorded nature is the subject, and never inside an
+aggregate, a sort, a filter, or any surface backed by `pokemon` reference data.**
+
+The ±10% applies to a **base stat**. A real in-game stat also needs IVs, EVs and
+level, none of which this app records — inventing them is the `expPerDay`
+mistake in a new costume.
+
+| Surface | |
+|---|---|
+| Trainer dashboard `statAverages` | **No.** It averages members with and without a nature; a mean over a mixed population means two things per bar. |
+| Profile base-stat chart | **No.** Species reference data, reachable with no roster attachment. |
+| Lookup sort / filter / `minBaseStatTotal` | **No.** Incoherent on a dex table. |
+| `/team`, `/dashboard`, `/api/trainers/:id/analysis`, readiness | **No.** |
+| Roster table, one row per member | **Yes, as text** — `Adamant (+Attack / −Sp. Atk)`. |
+| The per-member build panel | **Yes, with numbers** — the one site. |
+
+**No route may return an adjusted stat.** `/api/natures` returns which stat each
+nature raises and lowers, nothing more; the arithmetic lives in
+`natureAdjustedStat` in `lib/format.ts`, at the display edge. The moment a route
+emits `attackAdjusted`, some future aggregation averages it.
+
+Copy for the one numeric site: title **"Base stats, nature-adjusted"**, subtitle
+naming the nature and stating that it is not an in-game battle stat because IVs,
+EVs and level are not recorded. Columns `Base` and `Adjusted`, `+10%` / `−10%`
+badges on the two affected rows. **A neutral nature omits the Adjusted column
+entirely** — a column of identical numbers claims something was computed. Values
+are floored, matching the games, with no note about rounding.
 
 ### `type_damage`
 
@@ -378,11 +517,11 @@ All routes are under `/api`. Responses are JSON; errors are
 | GET | `/api/health` | Liveness + DB round trip |
 | GET | `/api/pokemon` | List — `search`, `type`, `generation`, `legendary`, `activity`, `trainerId`, `minBaseStatTotal`, `maxBaseStatTotal`, `region`, `habitat`, `shape`, `eggGroup`, `growthRate`, `evYield`, `baby`, `moveId`, `learnMethod`, `moveType`, `sort`, `direction`, `page`, `pageSize` |
 | GET | `/api/pokemon/filters` | Distinct types/generations/flags/trainers/habitats/shapes/egg groups/growth rates/learn methods for dropdowns, plus the static region list |
-| GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, full movepool, movepool summary, defensive `matchups`, dex neighbours, BST percentile |
+| GET | `/api/pokemon/:id` | Profile + its notes, activity, trainers carrying it, `abilities` with effect text, full movepool, movepool summary, defensive `matchups`, dex neighbours, BST percentile |
 | GET | `/api/moves` | Move catalogue — `search`, `type`, `damageClass`, `generation`, `pokemonId`, `trainerId`, `learnMethod`, `minPower`, `maxPower`, `sort`, `direction`, pagination |
 | GET | `/api/moves/filters` | Distinct types/generations/damage classes/learn methods/ailments and the power range |
-| GET | `/api/moves/:id` | Move + paginated learners (`learnMethod`, pagination), learn-method and type breakdowns, and trainers with an active-roster learner |
-| GET | `/api/admin/overview` | Reference-table completeness, workspace counts, and owner strings with no matching user |
+| GET | `/api/moves/:id` | Move + paginated learners (`learnMethod`, pagination), learn-method and type breakdowns, trainers with an active-roster learner, and `machines` (every TM number, newest game first) |
+| GET | `/api/admin/overview` | Reference-table completeness, workspace counts, owner strings with no matching user, and `strandedAbilities` |
 | PATCH | `/api/admin/trainers/:id/owner` | Hand a trainer to another user. **Not** guarded by current ownership — an orphaned trainer must stay recoverable |
 | POST | `/api/admin/reassign-owner` | Move everything under one owner string to another — `includeTrainers` (default true), `includeNotes`, `includeActivity` |
 | GET | `/api/users` | The whole user directory with per-user note/flag counts, plus `defaultOwner`. Unpaginated: it backs the switcher |
@@ -399,11 +538,14 @@ All routes are under `/api`. Responses are JSON; errors are
 | PATCH | `/api/trainers/:id` | Update a trainer |
 | DELETE | `/api/trainers/:id` | Delete a trainer; cascades to their roster rows |
 | POST | `/api/trainers/:id/roster` | Add a Pokémon to that trainer's roster |
-| PATCH | `/api/roster/:id` | Update nickname/level/status, or move the entry to another trainer |
+| GET | `/api/natures` | The 25 natures. Unpaginated: it backs a picker. Returns which stat each raises/lowers, **never an adjusted number** |
+| GET | `/api/roster/:id/build` | Everything the build editor needs in one call: current ability/nature/item, the species' legal abilities, all 25 natures, the whole item catalogue, and **unadjusted** base stats |
+| PUT | `/api/roster/:id/item` | Set or clear the held item (`itemSlug: null` clears). Checks only that the slug is a known item — **no per-species rule exists** |
+| PATCH | `/api/roster/:id` | Update nickname/level/status/`ability`/`nature`, or move the entry to another trainer. Rejects an ability the species cannot have, or an unknown nature |
 | DELETE | `/api/roster/:id` | Remove a roster entry |
 | GET | `/api/roster/:id/moves` | The entry's equipped moveset, in slot order |
 | PUT | `/api/roster/:id/moves` | Replace the whole moveset (≤ 4 ids). Rejects duplicates and moves the species can't learn |
-| GET | `/api/trainers/:id/analysis` | Team analysis from **equipped** movesets — `offense`, `defense`, `gaps`, `threats`, `readiness` |
+| GET | `/api/trainers/:id/analysis` | Team analysis from **equipped** movesets — `offense`, `defense`, `gaps`, `threats`, `readiness`, plus `build` (ability/nature/item counters, which feed no other figure) |
 | GET | `/api/notes` | Cross-Pokémon feed — `search` (note body **or** Pokémon name), `pokemonId`, `owner`, `trainerId`, `sort`, `direction`, pagination. Also returns `owners` and `trainers` for the filter dropdowns |
 | POST | `/api/notes` | Create |
 | PATCH | `/api/notes/:id` | Update body |
@@ -411,7 +553,7 @@ All routes are under `/api`. Responses are JSON; errors are
 | GET | `/api/activity` | Status flags joined to their Pokémon — `search`, `kind`, `owner`, `pokemonId`, `trainerId`, `sort`, `direction`, pagination. Also returns `owners`, `trainers`, `kinds`, and unfiltered `kindCounts` |
 | POST | `/api/activity/toggle` | Toggle a flag on/off |
 | DELETE | `/api/activity/:id` | Remove one flag row |
-| GET | `/api/stats/dashboard` | Every dashboard aggregation in one round trip — `bucketSize`, plus the filters `type`, `generation`, `legendary`, `mythical`, `region`, `habitat`, `eggGroup`, `growthRate`, `minBaseStatTotal`, `maxBaseStatTotal`. Returns `scope` (filtered vs. total) |
+| GET | `/api/stats/dashboard` | Every dashboard aggregation in one round trip — `bucketSize`, plus the filters `type`, `generation`, `legendary`, `mythical`, `region`, `habitat`, `eggGroup`, `growthRate`, `ability`, `minBaseStatTotal`, `maxBaseStatTotal`. Returns `scope` (filtered vs. total) |
 
 ### Conventions
 
@@ -517,6 +659,17 @@ All routes are under `/api`. Responses are JSON; errors are
   editor opens over the queue so it re-ranks without navigating away.
   **Every action there changes the ranking** — a Flag button was removed for
   exactly that reason once `flagged` stopped being a signal.
+- **A field carrying prose does not belong in a `<dl>` of right-aligned values.**
+  The Profile's reference card is label-left/value-right, which works for
+  "Height: 0.4 m" and is unreadable for an ability's effect sentence. Abilities
+  therefore sit below that list as a stacked block — name, then effect beneath.
+  Anything else that gains prose moves out the same way.
+- **A per-member editor takes scalar props, not an entity.** `MovesetEditor` and
+  `BuildEditor` both take `{ rosterId, memberName, … }`, which is why a
+  `RosterMember` (roster table), an `AttentionItem` (queue) and a board card can
+  all open them. Both also **unmount when closed** and remount on `key={rosterId}`
+  — `EditRosterMember` does neither, and its `useState(member?.…)` initialisers
+  do not reset between members opened in sequence. Copy the wrapper, not it.
 - **Response types are hand-written** in `lib/types.ts`. If you change a route's
   response shape, update the matching interface.
 - **`Paginator` takes the API's `pagination` object whole**, not spread fields,
@@ -578,7 +731,14 @@ Consequences worth knowing:
   that it plots every point.
 - The CRM tiles are scoped too, so they answer the same question as the charts.
 - "Most widely learned moves" counts learners **within the scope** rather than
-  reading `moves.learned_by_count`, which is dex-wide.
+  reading `moves.learned_by_count`, which is dex-wide. "TMs that reach the most
+  species" does the same, and shows the **latest** TM number per move
+  (`max(version_group_order)`), since numbers are reassigned every generation.
+- The abilities breakdown unnests a `text[]`, so **a species with two abilities
+  is counted under each** — the same double count the type breakdown has, and
+  stated in the card subtitle. Hidden abilities are excluded from it; they live
+  in their own column and get a summary tile, whose hint notes that PokeAPI
+  records one for only 856 of 1,025 species.
 
 ### Type effectiveness
 
@@ -628,6 +788,21 @@ Rules the analysis follows, all in `server/src/effectiveness.ts`:
   super-effective answer; the second ties on the best result even when that
   result is neutral. Charts asking "how many can answer this" want `answeredBy`.
 
+**`build` is a sibling of `readiness`, not part of it.** The analysis endpoint
+returns both. `readiness` carries the claim the Team page states out loud —
+every figure there is only as true as the movesets behind it — which is true of
+movesets and false of abilities, natures and items, none of which any figure
+reads. Folding them in would put those counters beside `withoutMoveset +
+withPartialMoveset` arithmetic they must never enter.
+
+**Three separate counters, never one "build completeness" figure.** A composite
+needs a denominator (four moves plus three fields = seven, weighted how?) and
+every weighting is an assertion this app cannot defend. It would also read as a
+team-strength score — the wrong-label problem `moveCoverage` was renamed for.
+The Team page's four readiness tiles stay as they are: that row is the page's
+honest-caveat row, and a fifth tile dilutes it. The counters sit under the
+Members table instead, where the fix is.
+
 Two dashboards, deliberately distinct: **`/team`** analyses one trainer's roster,
 **`/dashboard`** explores the whole dex. A figure about one roster belongs on the
 former.
@@ -637,6 +812,26 @@ former.
 `server/src/attention.ts`. **SQL gathers facts, TypeScript applies weights.**
 Every weight lives in `ATTENTION` (`constants.ts`) and produces both the score
 and the human-readable reasons.
+
+**Build signals are gated behind a full moveset.** `ability_missing` (6),
+`item_missing` (4) and `nature_missing` (3) fire only when `movesetSize === 4`.
+Two reasons:
+
+- **Nothing computes with them.** `movesetMissing` is 50 because an empty
+  moveset makes every figure on `/team` understate the roster — the weight is
+  paid for by a downstream consequence. A missing nature changes no number the
+  app reports, so it cannot rank near one that does. Both sit below
+  `movesetIncompletePerSlot` (8), the cost of one empty move slot.
+- **Nothing seeds them.** Ungated, every member of a fresh database would fire
+  both on top of `moveset_missing` — three chips on every row, which is the
+  roster wearing a queue's clothing. Gated, the queue reads as a progression:
+  get the moves in, then finish the build.
+
+Removing `movesetSize === 4` from that condition in `scoreFacts` ungates them.
+
+**The queue's primary button is a priority chain, not a ternary**: moves →
+build → review. The collapsed row has space for one button; every other action
+is named in the drawer.
 
 **Two lists, deliberately not one.**
 
@@ -745,7 +940,10 @@ CREATE DATABASE; without it `db:migrate` fails on a fresh machine with
 walkthrough.
 
 Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
-18-request type chart), `npm run db:generate` (new migration from schema changes),
+18-request type chart), `npm run seed:abilities` (ability effect text for the
+slugs the seeded dex references), `npm run seed:natures` (the 25 natures),
+`npm run seed:machines` (TM numbers — ~2,400 requests, needs `moves` seeded),
+`npm run seed:items` (~450 requests), `npm run db:generate` (new migration from schema changes),
 `npm run db:push` (dev-only direct sync), `npm run db:studio`,
 `npm run typecheck`, `npm run build`.
 
@@ -786,8 +984,16 @@ Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
   (they come with the `/pokemon` response); the move details are ~900 extra
   requests and ~30 more for version-group ordering. With it off, the moves pages
   render their empty states.
+- **`SEED_ABILITIES=false` skips ability effect text** (~284 requests on a full
+  dex). With it off, abilities render as their slugs with no prose — degraded,
+  not broken.
+- **`SEED_MACHINES=false` skips TM numbers** (~2,400 requests — the most
+  expensive pass after the dex itself). Movepool rows still say a move is
+  machine-taught, just not which machine. Needs `moves` seeded first.
+- **`SEED_ITEMS=false` skips holdable items** (~450 requests). With it off, held
+  items render as slugs and the build editor's item picker is empty.
 - The local Postgres uses `trust` auth on localhost, so `.env` has no password.
-  Azure needs `PGSSL=true` and `sslmode=require`.
+  A host that requires TLS needs `PGSSL=true` and `sslmode=require`.
 
 ---
 
@@ -798,7 +1004,7 @@ Other scripts: `npm run seed:users`, `npm run seed:types` (re-imports just the
 - **build** — `npm ci`, `typecheck`, `build`, on Node 20 (the `engines` floor)
   and 22. `fail-fast` is off.
 - **migrations** — spins up a Postgres 16 service, runs `db:create` and
-  `db:migrate` **twice each**, and asserts all eleven tables exist. Adding a table
+  `db:migrate` **twice each**, and asserts all sixteen tables exist. Adding a table
   means adding it to that list.
 
 **CI does not seed** — that would be ~2,600 PokéAPI requests per push, against
@@ -806,21 +1012,31 @@ their fair use policy. The seed is verified locally.
 
 CI needs no `.env`; the migrations job passes `DATABASE_URL` directly.
 
-## Deploying against Azure Postgres
+## Production
 
-Set `DATABASE_URL` to the Azure connection string (with `?sslmode=require`) and
-`PGSSL=true`; `db/client.ts` then connects with
-`ssl: { rejectUnauthorized: false }`, which Azure's managed Postgres requires.
-Run `npm run db:migrate` against the Azure database before the first deploy,
-then `npm run seed` once.
+Production is Docker Compose on the VPS at `pokemon-crm.ethandbard.com`.
+`docker-compose.yml` runs the Node image and Postgres 16. The app joins the
+shared `edge` network and publishes no host port. Postgres stays on `internal`.
+`config.env` is the Compose `env_file` and is git-ignored.
 
-In production the client is a static bundle (`client/dist`); serve it behind a
-proxy that forwards `/api` to the Express server.
+The hostname is a Cloudflare Access self-hosted app (one-time PIN, Allow
+`ethan@thebardfamily.com`). Local `npm run dev` is not behind Access. The
+app still has no sessions; see § `users`.
+
+`NODE_ENV=production` makes `server/src/index.ts` serve `client/dist` and
+fall through non-`/api` paths to `index.html`. There is no separate proxy.
+
+Run `npm run db:migrate` (and `npm run seed` once) against the container
+database after the first deploy. The image does not migrate on start.
+
+If a managed Postgres requires TLS, set `PGSSL=true` and `sslmode=require`.
+`db/client.ts` then uses `ssl: { rejectUnauthorized: false }`.
 
 ---
 
 ## Not yet built
 
-See [TODO.md](TODO.md). In short: no auth (users are an unverified "acting as"
-switcher — see § `users` and § Trainer ownership), no tests, no dark mode, and a
-single ~740 kB JS chunk.
+See [TODO.md](TODO.md). In short: no app-level auth (users are an unverified
+"acting as" switcher — see § `users` and § Trainer ownership; production is
+gated by Cloudflare Access), no tests, no dark mode, and a single ~740 kB JS
+chunk.

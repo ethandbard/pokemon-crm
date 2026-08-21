@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { moves, pokemon, pokemonMoves, roster, trainers } from '../db/schema.js';
+import { moveMachines, moves, pokemon, pokemonMoves, roster, trainers } from '../db/schema.js';
 import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
 import { POKEMON_TYPES } from '../constants.js';
 import { scopeSchema, trainerScopeSql } from '../owner.js';
@@ -204,7 +204,7 @@ movesRouter.get(
     if (query.learnMethod) learnerFilters.push(eq(pokemonMoves.learnMethod, query.learnMethod));
     const learnerWhere = and(...learnerFilters);
 
-    const [learners, [learnerTotal], methodBreakdown, typeBreakdown, trainerRows] =
+    const [learners, [learnerTotal], methodBreakdown, typeBreakdown, trainerRows, machines] =
       await Promise.all([
         db
           .select({
@@ -284,6 +284,25 @@ movesRouter.get(
           )) > 0
           order by learners desc, t.name asc
         `),
+
+        /*
+         * Every machine that has ever taught this move, newest game first.
+         *
+         * Ordered by `version_group_order`, not id — PokeAPI's version-group
+         * ids are not chronological. This is the surface the per-game table
+         * exists for: a move is TM42 in one era and TM109 in another, and a
+         * single "current TM" column could not say so.
+         */
+        db
+          .select({
+            versionGroup: moveMachines.versionGroup,
+            versionGroupOrder: moveMachines.versionGroupOrder,
+            tmNumber: moveMachines.tmNumber,
+            itemSlug: moveMachines.itemSlug,
+          })
+          .from(moveMachines)
+          .where(eq(moveMachines.moveId, id))
+          .orderBy(desc(moveMachines.versionGroupOrder), desc(moveMachines.id)),
       ]);
 
     res.json({
@@ -292,6 +311,8 @@ movesRouter.get(
       methodBreakdown: methodBreakdown.rows,
       typeBreakdown: typeBreakdown.rows,
       trainers: trainerRows.rows,
+      /** Newest game first; empty for a move no machine has ever taught. */
+      machines,
       pagination: paginationFor(query.page, query.pageSize, learnerTotal?.count ?? 0),
     });
   }),

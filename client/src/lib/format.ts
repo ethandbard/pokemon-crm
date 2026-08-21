@@ -64,6 +64,83 @@ export const STAT_LABELS = {
   speed: 'Speed',
 } as const;
 
+/**
+ * PokeAPI's stat slugs, as `natures.increased_stat` holds them, mapped to the
+ * camelCase keys the `pokemon` columns use on the client.
+ *
+ * Two vocabularies for the same six stats: `special-attack` in nature rows,
+ * `specialAttack` in a Pokémon record. Nothing else bridges them.
+ *
+ * **`hp` is absent on purpose** — no nature affects HP, so a nature row can
+ * never name it.
+ */
+export const NATURE_STAT_KEYS = {
+  attack: 'attack',
+  defense: 'defense',
+  'special-attack': 'specialAttack',
+  'special-defense': 'specialDefense',
+  speed: 'speed',
+} as const satisfies Record<string, keyof typeof STAT_LABELS>;
+
+export type NatureStatSlug = keyof typeof NATURE_STAT_KEYS;
+
+/** The multiplier a nature applies, as a percentage step. Fixed by the games. */
+export const NATURE_STEP = 0.1;
+
+/** A nature's stat slug as its display label — `special-attack` → `Sp. Atk`. */
+export function natureStatLabel(slug: string | null): string {
+  if (!slug) return '—';
+  const key = NATURE_STAT_KEYS[slug as NatureStatSlug];
+  return key ? STAT_LABELS[key] : slug;
+}
+
+/**
+ * A nature's effect as a short label — `+Atk / −SpA`, or `neutral`.
+ *
+ * Used wherever a nature appears as **text**, which is everywhere except the one
+ * per-member panel allowed to show adjusted numbers. See CLAUDE.md § Natures for
+ * the boundary; the short answer is that a nature-adjusted figure may only be
+ * shown for a single named roster member, never inside an aggregate.
+ */
+export function natureEffectLabel(
+  increasedStat: string | null,
+  decreasedStat: string | null,
+): string {
+  // The five neutral natures raise and lower the same stat, so PokeAPI reports
+  // both as null. They are a real choice, not missing data — say so rather than
+  // rendering an em dash that reads as "not set".
+  if (!increasedStat || !decreasedStat) return 'neutral';
+
+  const up = STAT_LABELS[NATURE_STAT_KEYS[increasedStat as NatureStatSlug]] ?? increasedStat;
+  const down = STAT_LABELS[NATURE_STAT_KEYS[decreasedStat as NatureStatSlug]] ?? decreasedStat;
+  return `+${up} / −${down}`;
+}
+
+/**
+ * A base stat with this nature's ±10% applied, floored.
+ *
+ * ⚠️ **This is an adjusted BASE stat, not an in-game battle stat.** The real
+ * value also depends on IVs, EVs and level, none of which this app records.
+ * Every call site must label it as such — see CLAUDE.md § Natures.
+ *
+ * Returns the value unchanged for a neutral nature or an unrecognised stat, so a
+ * missing `natures` row degrades to "no adjustment" rather than to a wrong one.
+ */
+export function natureAdjustedStat(
+  base: number,
+  statKey: keyof typeof STAT_LABELS,
+  increasedStat: string | null,
+  decreasedStat: string | null,
+): number {
+  if (increasedStat && NATURE_STAT_KEYS[increasedStat as NatureStatSlug] === statKey) {
+    return Math.floor(base * (1 + NATURE_STEP));
+  }
+  if (decreasedStat && NATURE_STAT_KEYS[decreasedStat as NatureStatSlug] === statKey) {
+    return Math.floor(base * (1 - NATURE_STEP));
+  }
+  return base;
+}
+
 export const ACTIVITY_META: Record<ActivityKind, { label: string; icon: string; hint: string }> = {
   caught: { label: 'Caught', icon: '●', hint: 'In the collection' },
   favorite: { label: 'Favorite', icon: '★', hint: 'Starred for quick access' },

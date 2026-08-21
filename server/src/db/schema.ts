@@ -478,6 +478,172 @@ export const typeDamage = pgTable(
 );
 
 /**
+ * Ability effect text, from `/ability/{name}` — reference data, written only by
+ * the seed.
+ *
+ * `pokemon.abilities` and `pokemon.hidden_ability` already hold ability **slugs**;
+ * this table is what turns those slugs into prose. **There is deliberately no
+ * foreign key**, and the join is slug-to-slug — the same arrangement as
+ * `notes.owner` → `users.email`. The slug columns predate this table and a
+ * partial seed (or `SEED_ABILITIES=false`) leaves them pointing at nothing, so
+ * every read must tolerate a miss and fall back to the raw slug rather than
+ * dropping the ability from the list.
+ *
+ * Unlike the type chart this is **not** all-or-nothing: a missing row degrades
+ * to a slug, which is what the app showed before this table existed. A missing
+ * type-chart row would instead read as a plausible-looking wrong answer.
+ */
+export const abilities = pgTable(
+  'abilities',
+  {
+    /** PokeAPI's ability slug (`levitate`), which is what `pokemon.abilities` holds. */
+    slug: text('slug').primaryKey(),
+    displayName: text('display_name').notNull(),
+    /** The full effect, with PokeAPI's `$effect_chance` placeholder substituted. */
+    effect: text('effect'),
+    /** The one-line version, for places with no room for the full text. */
+    shortEffect: text('short_effect'),
+    generation: integer('generation'),
+    /**
+     * False for the handful of side-game abilities. Kept rather than filtered at
+     * seed time so a species referencing one still resolves to a name.
+     */
+    isMainSeries: boolean('is_main_series').notNull().default(true),
+  },
+  (table) => [index('abilities_generation_idx').on(table.generation)],
+);
+
+/**
+ * Items a Pokémon can hold — reference data, written only by the seed.
+ *
+ * **Deliberately not all ~2,180 items.** The seed fetches the battle-relevant
+ * categories (`held-items`, `choice`, `type-enhancement`, plates, berries that
+ * trigger in battle, …) plus every slug already named in `pokemon.held_items`.
+ * Poké Balls, mail, curry ingredients and TMs are not things a roster member
+ * carries into a fight, and importing them would put 1,700 rows in a picker to
+ * make three of them reachable.
+ *
+ * Joined slug-to-slug with **no foreign key** from `roster_items.item_slug`, the
+ * same arrangement as `abilities` and `natures` — reads coalesce to the slug.
+ */
+export const items = pgTable(
+  'items',
+  {
+    /** PokeAPI's item slug (`leftovers`). */
+    slug: text('slug').primaryKey(),
+    displayName: text('display_name').notNull(),
+    /** PokeAPI's item category (`held-items`, `type-enhancement`, …). */
+    category: text('category'),
+    effect: text('effect'),
+    shortEffect: text('short_effect'),
+    spriteUrl: text('sprite_url'),
+    /** Base power when thrown with Fling; null for most items. */
+    flingPower: integer('fling_power'),
+  },
+  (table) => [index('items_category_idx').on(table.category)],
+);
+
+/**
+ * The item a roster member actually carries — the equipped half, like
+ * `roster_moves`.
+ *
+ * ⚠️ **There is no per-species legality rule here, unlike abilities and moves.**
+ * Any Pokémon can hold any held item; the games impose no restriction worth
+ * modelling. `PUT /api/roster/:id/item` checks only that the slug is a known
+ * item. Do not add a species constraint expecting one to exist, and do not build
+ * a "recommended item" affordance on top of this — with no rule to derive one
+ * from, any recommendation would be invented.
+ *
+ * One item per member, so this is keyed uniquely on `roster_id` and has no slot
+ * column — the four-slot mechanic `roster_moves` needs has no analogue.
+ */
+export const rosterItems = pgTable(
+  'roster_items',
+  {
+    id: serial('id').primaryKey(),
+    rosterId: integer('roster_id')
+      .notNull()
+      .references(() => roster.id, { onDelete: 'cascade' })
+      .unique(),
+    itemSlug: text('item_slug').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('roster_items_item_idx').on(table.itemSlug)],
+);
+
+/**
+ * Which TM (or HM, or TR) teaches a move, per game — reference data, written
+ * only by the seed.
+ *
+ * `pokemon_moves.learn_method = 'machine'` records *that* a move is machine-taught
+ * but not *which* machine. This table answers that, and keeps **one row per
+ * (move, version group)** rather than a single current number, because TMs are
+ * renumbered every generation: Facade is TM42 in one era and TM109 in another.
+ * A single column would have to pick one and silently misdate the rest.
+ *
+ * - **`version_group_order` is stored alongside the name** because "the latest
+ *   TM" is otherwise unanswerable in SQL: PokeAPI's version-group **ids are not
+ *   chronological** (`blue-japan` is id 29, order 2), and nothing else in this
+ *   database records the ordering. `max(version_group_order)` per move is the
+ *   current TM.
+ * - `item_slug` is PokeAPI's item name (`tm109`); `tm_number` is that
+ *   uppercased (`TM109`). Keeping both means the display value needs no parsing
+ *   and the item reference stays intact for a future join to `items`.
+ * - Rows are **deleted and reinserted** for the moves the seed fetched, like
+ *   `pokemon_moves` — a machine dropped in a later game would never conflict, so
+ *   an upsert would leave it behind forever.
+ */
+export const moveMachines = pgTable(
+  'move_machines',
+  {
+    id: serial('id').primaryKey(),
+    moveId: integer('move_id')
+      .notNull()
+      .references(() => moves.id, { onDelete: 'cascade' }),
+    versionGroup: text('version_group').notNull(),
+    /** PokeAPI's `order` for that group — the only chronology available. */
+    versionGroupOrder: integer('version_group_order'),
+    /** `TM109`, `HM01`, `TR20`. Uppercased `item_slug`. */
+    tmNumber: text('tm_number').notNull(),
+    itemSlug: text('item_slug').notNull(),
+  },
+  (table) => [
+    uniqueIndex('move_machines_move_version_idx').on(table.moveId, table.versionGroup),
+    index('move_machines_move_idx').on(table.moveId),
+  ],
+);
+
+/**
+ * The 25 natures, from `/nature` — reference data, written only by the seed.
+ *
+ * A nature raises one stat by 10% and lowers another by 10%. Three things about
+ * the shape that are easy to get wrong:
+ *
+ * - **`increased_stat` and `decreased_stat` are null for the five neutral
+ *   natures** (`hardy`, `docile`, `bashful`, `quirky`, `serious`), which raise
+ *   and lower the same stat and so do nothing. Code that reads `.name` off these
+ *   without a guard crashes on Hardy.
+ * - **No nature affects HP.** The five stats in play are attack, defense,
+ *   special-attack, special-defense and speed — 5 × 5 = the 25 rows.
+ * - Stat names are PokeAPI slugs (`special-attack`), not the column names used
+ *   in `pokemon`.
+ *
+ * ⚠️ The ±10% belongs to a **base stat** here. A real in-game stat also depends
+ * on IVs, EVs and level, none of which this app records — see CLAUDE.md
+ * § Natures for where an adjusted number may and may not be displayed.
+ */
+export const natures = pgTable('natures', {
+  /** PokeAPI's nature slug (`adamant`), which is what `roster.nature` holds. */
+  slug: text('slug').primaryKey(),
+  displayName: text('display_name').notNull(),
+  /** Stat raised 10%, as a PokeAPI slug. **Null for the five neutral natures.** */
+  increasedStat: text('increased_stat'),
+  /** Stat lowered 10%. Null exactly when `increasedStat` is. */
+  decreasedStat: text('decreased_stat'),
+});
+
+/**
  * Where a roster member sits in the trainer's line-up. The advising analogue of
  * an active/inactive caseload: `retired` keeps the history without counting
  * toward the working roster.
@@ -552,6 +718,29 @@ export const roster = pgTable(
     nickname: text('nickname'),
     level: integer('level'),
     status: rosterStatus('status').notNull().default('active'),
+    /**
+     * Which of its species' abilities this member actually has — a trainer's
+     * choice about one entry, not a fact about the species, which is why it
+     * lives here and not on `pokemon`.
+     *
+     * **Legality is enforced in the route, not here**: the value must appear in
+     * that species' `pokemon.abilities` or equal its `hidden_ability` — a
+     * constraint against another row's array, which no foreign key can express.
+     * `PATCH /api/roster/:id` validates it. Holds a slug, joined to `abilities`
+     * with no FK, so reads coalesce to the raw slug.
+     */
+    ability: text('ability'),
+    /**
+     * This member's nature — again a trainer's choice about one entry, not a
+     * fact about the species. Holds a slug, joined to `natures` with no FK, so
+     * reads coalesce to the raw slug.
+     *
+     * **Nothing on the server computes with this.** The ±10% is applied at the
+     * display edge, on one named member at a time; no route may return an
+     * adjusted stat, because the first one that does will end up inside an
+     * average. See CLAUDE.md § Natures.
+     */
+    nature: text('nature'),
     acquiredAt: timestamp('acquired_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -666,3 +855,13 @@ export type TypeDamage = typeof typeDamage.$inferSelect;
 export type NewTypeDamage = typeof typeDamage.$inferInsert;
 export type RosterMove = typeof rosterMoves.$inferSelect;
 export type NewRosterMove = typeof rosterMoves.$inferInsert;
+export type Ability = typeof abilities.$inferSelect;
+export type NewAbility = typeof abilities.$inferInsert;
+export type Nature = typeof natures.$inferSelect;
+export type NewNature = typeof natures.$inferInsert;
+export type MoveMachine = typeof moveMachines.$inferSelect;
+export type NewMoveMachine = typeof moveMachines.$inferInsert;
+export type Item = typeof items.$inferSelect;
+export type NewItem = typeof items.$inferInsert;
+export type RosterItem = typeof rosterItems.$inferSelect;
+export type NewRosterItem = typeof rosterItems.$inferInsert;

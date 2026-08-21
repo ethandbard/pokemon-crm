@@ -13,7 +13,7 @@ import { toQueryString } from '../lib/api';
 import type { TrainerAnalysis, TrainerListItem } from '../lib/types';
 import { Card, EmptyState, ErrorState, Loading, StatTile, TypeBadge } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
-import { effectivenessLabel, titleCase } from '../lib/format';
+import { effectivenessLabel, natureEffectLabel, titleCase } from '../lib/format';
 import { PAGE_CONTAINER } from '../lib/page';
 import { useCurrentUser } from '../lib/useCurrentUser';
 import { BAR_RADIUS, SERIES_1, axisProps, tooltipProps } from '../lib/charts';
@@ -97,7 +97,10 @@ function TeamAnalysis({ trainerId }: { trainerId: string }) {
   if (error) return <ErrorState message={error} onRetry={refetch} />;
   if (!data) return null;
 
-  const { readiness, threats, offense, defense, gaps } = data;
+  const { readiness, threats, offense, defense, gaps, build } = data;
+
+  /** Build detail by roster entry, so the Members table can join the two lists. */
+  const buildByRoster = new Map(build.members.map((member) => [member.rosterId, member]));
 
   if (readiness.activeMembers === 0) {
     return (
@@ -262,7 +265,10 @@ function TeamAnalysis({ trainerId }: { trainerId: string }) {
         </ul>
       </Card>
 
-      <Card title="Members" subtitle="Moveset completeness across the active roster">
+      <Card
+        title="Members"
+        subtitle="Moveset, ability, nature and held item across the active roster"
+      >
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -273,29 +279,77 @@ function TeamAnalysis({ trainerId }: { trainerId: string }) {
                 <th scope="col" className="px-2 py-2 text-right font-medium">
                   Moveset
                 </th>
+                <th scope="col" className="px-2 py-2 font-medium">
+                  Ability
+                </th>
+                <th scope="col" className="px-2 py-2 font-medium">
+                  Nature
+                </th>
+                <th scope="col" className="px-2 py-2 font-medium">
+                  Item
+                </th>
               </tr>
             </thead>
             <tbody>
-              {readiness.members.map((member) => (
-                <tr key={member.rosterId} className="border-b border-hairline last:border-0">
-                  <td className="px-2 py-2 text-ink">
-                    {member.nickname ?? member.displayName}
-                    {member.nickname && (
-                      <span className="ml-1.5 text-xs text-muted">({member.displayName})</span>
-                    )}
-                  </td>
-                  <td
-                    className={`px-2 py-2 text-right tabular-nums ${
-                      member.movesetSize === 0 ? 'text-status-critical' : 'text-ink'
-                    }`}
-                  >
-                    {member.movesetSize}/4
-                  </td>
-                </tr>
-              ))}
+              {readiness.members.map((member) => {
+                // Joined on the client rather than widening `readiness`, which
+                // must keep meaning "how true is everything else on this page".
+                const details = buildByRoster.get(member.rosterId);
+                return (
+                  <tr key={member.rosterId} className="border-b border-hairline last:border-0">
+                    <td className="px-2 py-2 text-ink">
+                      {member.nickname ?? member.displayName}
+                      {member.nickname && (
+                        <span className="ml-1.5 text-xs text-muted">({member.displayName})</span>
+                      )}
+                    </td>
+                    <td
+                      className={`px-2 py-2 text-right tabular-nums ${
+                        member.movesetSize === 0 ? 'text-status-critical' : 'text-ink'
+                      }`}
+                    >
+                      {member.movesetSize}/4
+                    </td>
+                    {/* Only an empty moveset is critical here. An unset item
+                        makes no figure on this page wrong, so it stays muted. */}
+                    <td className="px-2 py-2 text-ink">
+                      {details?.abilityName ?? <span className="text-muted">—</span>}
+                    </td>
+                    <td className="px-2 py-2 text-ink">
+                      {details?.nature ? (
+                        <>
+                          {details.natureName}
+                          <span className="ml-1.5 text-xs text-muted">
+                            {natureEffectLabel(
+                              details.natureIncreasedStat,
+                              details.natureDecreasedStat,
+                            )}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2 text-ink">
+                      {details?.heldItemName ?? <span className="text-muted">—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
+
+        {/*
+          The build counters live here rather than as a fifth readiness tile.
+          That tile row is the page's honest-caveat row — every figure above is
+          only as true as the movesets behind it — and none of these three feed
+          any figure at all. Stated where the fix is, not where the warning is.
+        */}
+        <p className="mt-3 border-t border-hairline pt-3 text-xs text-muted">
+          Ability set on {build.withAbility}/{build.activeMembers} · Nature on {build.withNature}/
+          {build.activeMembers} · Item on {build.withItem}/{build.activeMembers}
+        </p>
       </Card>
     </div>
   );

@@ -16,7 +16,11 @@
     "seed": "tsx src/scripts/seed.ts",
     "seed:trainers": "tsx src/scripts/seed-trainers.ts",
     "seed:users": "tsx src/scripts/seed-users.ts",
-    "seed:types": "tsx src/scripts/seed-types.ts"
+    "seed:types": "tsx src/scripts/seed-types.ts",
+    "seed:abilities": "tsx src/scripts/seed-abilities.ts",
+    "seed:natures": "tsx src/scripts/seed-natures.ts",
+    "seed:machines": "tsx src/scripts/seed-machines.ts",
+    "seed:items": "tsx src/scripts/seed-items.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -2,9 +2,19 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { activity, moves, notes, pokemon, pokemonMoves, roster, trainers } from '../db/schema.js';
+import {
+  abilities,
+  activity,
+  moveMachines,
+  moves,
+  notes,
+  pokemon,
+  pokemonMoves,
+  roster,
+  trainers,
+} from '../db/schema.js';
 import { asyncHandler, badRequest, notFound, paginationFor } from '../http.js';
-import { POKEMON_TYPES, REGIONS, REGION_POKEDEXES } from '../constants.js';
+import { POKEMON_TYPES, REGIONS, REGION_POKEDEXES, titleCase } from '../constants.js';
 import { defensiveProfile, loadTypeChart } from '../effectiveness.js';
 import { scopeSchema, trainerScope } from '../owner.js';
 
@@ -324,8 +334,24 @@ pokemonRouter.get(
     const [record] = await db.select().from(pokemon).where(eq(pokemon.id, id)).limit(1);
     if (!record) throw notFound(`No Pokémon with id ${id}`);
 
-    const [noteRows, activityRows, neighbours, trainerRows, chainRows, moveRows, moveSummary] =
-      await Promise.all([
+    /**
+     * Every ability slug this species carries, ordinary and hidden alike — the
+     * lookup keys for the effect text fetched below.
+     */
+    const abilitySlugs = [...record.abilities, record.hiddenAbility].filter(
+      (slug): slug is string => Boolean(slug),
+    );
+
+    const [
+      noteRows,
+      activityRows,
+      neighbours,
+      trainerRows,
+      chainRows,
+      moveRows,
+      moveSummary,
+      abilityRows,
+    ] = await Promise.all([
         db.select().from(notes).where(eq(notes.pokemonId, id)).orderBy(desc(notes.createdAt)),
         db.select().from(activity).where(eq(activity.pokemonId, id)).orderBy(asc(activity.kind)),
         db
@@ -391,6 +417,25 @@ pokemonRouter.get(
             learnMethod: pokemonMoves.learnMethod,
             levelLearnedAt: pokemonMoves.levelLearnedAt,
             versionGroup: pokemonMoves.versionGroup,
+            /*
+             * The move's most recent TM, or null.
+             *
+             * "Most recent" is `max(version_group_order)`, not `max(id)` —
+             * PokeAPI's version-group ids are not chronological, which is why
+             * that order is stored on the row at all. Correlated subquery, so
+             * the inner table is aliased and the outer reference qualified.
+             *
+             * Not filtered to `learn_method = 'machine'`: a move can be both
+             * level-up for this species and a TM in general, and the number is
+             * true either way. The UI shows it on machine rows.
+             */
+            tmNumber: sql<string | null>`(
+              select mm.tm_number
+              from ${moveMachines} mm
+              where mm.move_id = ${moves}.id
+              order by mm.version_group_order desc nulls last, mm.id desc
+              limit 1
+            )`,
           })
           .from(pokemonMoves)
           .innerJoin(moves, eq(pokemonMoves.moveId, moves.id))
@@ -440,7 +485,36 @@ pokemonRouter.get(
           join ${moves} m on m.id = pm.move_id
           where pm.pokemon_id = ${id}
         `),
+
+        // Effect text for this species' abilities. The join is slug-to-slug
+        // with no FK, so a miss is expected rather than exceptional — see the
+        // assembly below, which falls back to the slug.
+        abilitySlugs.length === 0
+          ? Promise.resolve([])
+          : db.select().from(abilities).where(inArray(abilities.slug, abilitySlugs)),
       ]);
+
+    /**
+     * Abilities as objects rather than slugs, in slot order with the hidden one
+     * last.
+     *
+     * Built from `record.abilities` rather than from the fetched rows so slot
+     * order survives and **an ability with no `abilities` row still appears** —
+     * it renders as its title-cased slug with no effect text, which is what the
+     * whole Profile showed before that table existed. Dropping it instead would
+     * make a failed seed look like a species with fewer abilities.
+     */
+    const abilityBySlug = new Map(abilityRows.map((row) => [row.slug, row]));
+    const abilityList = abilitySlugs.map((slug) => {
+      const row = abilityBySlug.get(slug);
+      return {
+        slug,
+        displayName: row?.displayName ?? titleCase(slug),
+        effect: row?.effect ?? null,
+        shortEffect: row?.shortEffect ?? null,
+        isHidden: slug === record.hiddenAbility,
+      };
+    });
 
     // How this Pokémon's base stat total ranks against the whole dataset.
     const [rank] = await db
@@ -459,6 +533,7 @@ pokemonRouter.get(
       notes: noteRows,
       activity: activityRows,
       trainers: trainerRows,
+      abilities: abilityList,
       moves: moveRows,
       moveSummary: moveSummary.rows[0] ?? null,
       matchups,

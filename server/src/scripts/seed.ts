@@ -38,9 +38,13 @@ import {
   type RegionalDexNumbers,
 } from '../db/schema.js';
 import { env } from '../env.js';
-import { generationForDexNumber, generationForSlug } from '../constants.js';
-import { POKEAPI, fetchJson, mapWithConcurrency, type NamedRef } from './pokeapi.js';
+import { generationForDexNumber, generationForSlug, titleCase } from '../constants.js';
+import { ENGLISH, POKEAPI, fetchJson, mapWithConcurrency, type NamedRef } from './pokeapi.js';
 import { seedTypeChart } from './seed-types.js';
+import { seedAbilities } from './seed-abilities.js';
+import { seedNatures } from './seed-natures.js';
+import { seedMachines } from './seed-machines.js';
+import { seedItems } from './seed-items.js';
 
 interface PokemonResponse {
   id: number;
@@ -125,6 +129,14 @@ interface MoveResponse {
     healing: number | null;
   } | null;
   target: NamedRef | null;
+  /**
+   * Which machine teaches this move, per game. Comes free with this response —
+   * only resolving each `machine.url` costs a request.
+   *
+   * **Not in chronological order**: Facade lists Let's Go, then Sword/Shield,
+   * then Ruby/Sapphire. Recency comes from the version group's `order`.
+   */
+  machines?: { machine: { url: string }; version_group: NamedRef }[];
 }
 
 /** One (species, move, method) enrolment, before move ids are resolved. */
@@ -380,14 +392,6 @@ function walkChain(chain: EvolutionChainResponse): Map<number, EvolutionFacts> {
 }
 
 /** `ho-oh` → `Ho Oh`, `porygon-z` → `Porygon Z`, `mr-mime` → `Mr Mime`. */
-function titleCase(slug: string): string {
-  return slug
-    .split('-')
-    .filter(Boolean)
-    .map((part) => part[0]!.toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
 function statValue(stats: PokemonResponse['stats'], name: string): number {
   return stats.find((s) => s.stat.name === name)?.base_stat ?? 0;
 }
@@ -396,8 +400,6 @@ function statValue(stats: PokemonResponse['stats'], name: string): number {
 function effortValue(stats: PokemonResponse['stats'], name: string): number {
   return stats.find((s) => s.stat.name === name)?.effort ?? 0;
 }
-
-const ENGLISH = (ref: NamedRef) => ref.name === 'en';
 
 /**
  * Pokédex flavour text is stored per game, so a species has ~30 entries and
@@ -793,6 +795,7 @@ async function seedMoves(built: BuiltRow[]) {
   if (moveFailures.length) {
     console.warn(`[seed] ${moveFailures.length} moves failed: ${moveFailures.join(', ')}`);
   }
+
 }
 
 async function main() {
@@ -974,11 +977,38 @@ async function main() {
   // 18 requests flat, independent of SEED_LIMIT and of the moves import.
   await seedTypeChart();
 
-  // --- Fifth pass: moves ---------------------------------------------------
+  // --- Fifth pass: ability effect text -------------------------------------
+  // Reads the slugs `pokemon` was just written with, so it scales with
+  // SEED_LIMIT rather than fetching all 370 abilities every time.
+  if (env.seedAbilities) {
+    await seedAbilities();
+  } else {
+    console.log('[seed] SEED_ABILITIES=false — skipping abilities; they will render as slugs.');
+  }
+
+  // --- Sixth pass: natures --------------------------------------------------
+  // 26 requests flat and independent of everything else, like the type chart.
+  await seedNatures();
+
+  // --- Seventh pass: holdable items -----------------------------------------
+  // Scoped to the battle-relevant categories plus what the dex references, so
+  // ~450 requests rather than the ~2,180 a full item import would cost.
+  if (env.seedItems) {
+    await seedItems();
+  } else {
+    console.log('[seed] SEED_ITEMS=false — skipping items; held items render as slugs.');
+  }
+
+  // --- Eighth pass: moves ---------------------------------------------------
   // The only pass that costs requests beyond the dex itself, which is why it
   // can be turned off.
   if (env.seedMoves) {
     await seedMoves(built);
+    if (env.seedMachines) {
+      await seedMachines();
+    } else {
+      console.log('[seed] SEED_MACHINES=false — skipping TM numbers.');
+    }
   } else {
     console.log('[seed] SEED_MOVES=false — skipping moves.');
   }
