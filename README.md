@@ -111,6 +111,10 @@ Production is a Docker Compose stack on the VPS, published at
 file runs the app and Postgres 16, joins the shared `edge` network, and
 publishes no host port. `config.env` is gitignored.
 
+The public hostname is behind Cloudflare Access. An unauthenticated browser
+gets a one-time PIN prompt. Local `npm run dev` is not behind Access. The
+app itself still has no sessions; Access is the gate.
+
 `git push` does not deploy. Copy `HEAD` to `/opt/pokemon-crm` through the
 private `deploy-pipeline` skill, then rebuild.
 

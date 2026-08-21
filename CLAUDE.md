@@ -1019,6 +1019,10 @@ Production is Docker Compose on the VPS at `pokemon-crm.ethandbard.com`.
 shared `edge` network and publishes no host port. Postgres stays on `internal`.
 `config.env` is the Compose `env_file` and is git-ignored.
 
+The hostname is a Cloudflare Access self-hosted app (one-time PIN, Allow
+`ethan@thebardfamily.com`). Local `npm run dev` is not behind Access. The
+app still has no sessions; see § `users`.
+
 `NODE_ENV=production` makes `server/src/index.ts` serve `client/dist` and
 fall through non-`/api` paths to `index.html`. There is no separate proxy.
 
@@ -1032,6 +1036,7 @@ If a managed Postgres requires TLS, set `PGSSL=true` and `sslmode=require`.
 
 ## Not yet built
 
-See [TODO.md](TODO.md). In short: no auth (users are an unverified "acting as"
-switcher — see § `users` and § Trainer ownership), no tests, no dark mode, and a
-single ~740 kB JS chunk.
+See [TODO.md](TODO.md). In short: no app-level auth (users are an unverified
+"acting as" switcher — see § `users` and § Trainer ownership; production is
+gated by Cloudflare Access), no tests, no dark mode, and a single ~740 kB JS
+chunk.

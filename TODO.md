@@ -404,12 +404,13 @@ Four things worth keeping:
   first suite: the aggregation endpoints (`/api/stats/dashboard`,
   `/api/trainers/:id`, `/api/attention`, `/api/moves/:id`) asserted against a
   known seeded fixture.
-- **No authentication.** The `users` table and "acting as" switcher attribute
-  writes but verify nothing — the acting user is a header the client sets. Real
-  auth means sessions and a check in `ownerFor`. **Item 7d now leans on this**:
-  trainer ownership scopes reads and 403s writes, which is real behaviour built
-  on an unverified claim. Auth is the one gap that turns a convention into a
-  guarantee.
+- **No app-level authentication.** Cloudflare Access gates
+  `pokemon-crm.ethandbard.com` (one-time PIN). Inside the app, the `users`
+  table and "acting as" switcher still attribute writes but verify nothing —
+  the acting user is a header the client sets. Real in-app auth means sessions
+  and a check in `ownerFor`. **Item 7d now leans on this**: trainer ownership
+  scopes reads and 403s writes, which is real behaviour built on an unverified
+  claim. Access stops strangers; it does not make the switcher a login.
 - **Single ~770 kB JS chunk.** Route-level `React.lazy` would split Recharts out
   of the pages that don't chart.
 - **The Performance Dashboard's filters live in React state, not the URL.** The
