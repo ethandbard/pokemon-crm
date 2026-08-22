@@ -6,6 +6,8 @@
 A CRM-style tool for looking up Pokémon, tracking notes, and viewing performance
 stats, modelled on student-advising tools.
 
+**Live**: [pokemon-crm.ethandbard.com](https://pokemon-crm.ethandbard.com) (sign-in required), listed on [ethandbard.com](https://ethandbard.com).
+
 - **Home** — workspace counters and links into every section
 - **Trainers** — per-trainer dashboard of roster, stats, and note/activity history
 - **Pokémon Lookup** — searchable, filterable, sortable table of all 1,025 Pokémon
