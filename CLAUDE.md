@@ -698,6 +698,15 @@ Two colour systems, kept apart:
   Dashboard's analytical charts. Chart series come from the series tokens;
   chrome comes from brand.
 
+`--font-mono` (`'JetBrains Mono'`, loaded via Google Fonts `<link>` in
+`index.html`, same mechanism as notebox) is the Pokédex-readout face for dex
+numbers and stat figures — the `dex-mono` utility class in `index.css`
+applies it. A handful of other restrained, namespaced `dex-*` decorative
+classes live in `index.css`: `dex-dot` (a pulsing status light, on the
+sidebar mark), `dex-screen` (a device-bezel card treatment, on the Profile's
+identity card), `dex-pokeball-bg` (a faint masked Poké Ball watermark, on
+`EmptyState`). All respect `prefers-reduced-motion`.
+
 ### Charting
 
 **The chrome lives in `lib/charts.ts`** — `SERIES_1..4`, `axisProps`,
