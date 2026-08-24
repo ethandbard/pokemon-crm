@@ -144,9 +144,14 @@ export function Sidebar() {
         to="/"
         end
         title="Pokémon CRM — home"
-        className="group relative mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-sm font-bold text-white transition-colors hover:bg-brand-strong"
+        className="group relative mb-4 flex h-9 w-9 items-center justify-center rounded-lg bg-brand font-mono text-sm font-bold text-white transition-colors hover:bg-brand-strong"
       >
         P
+        {/* A small pulsing lens light, like a Pokédex's power indicator. */}
+        <span
+          aria-hidden="true"
+          className="dex-dot absolute -right-0.5 -top-0.5 ring-2 ring-surface"
+        />
         <span className="sr-only">Pokémon CRM home</span>
         <span className="pointer-events-none absolute left-full z-20 ml-2 hidden whitespace-nowrap rounded-md bg-ink px-2 py-1 text-xs font-normal text-white group-hover:block">
           Pokémon CRM — home

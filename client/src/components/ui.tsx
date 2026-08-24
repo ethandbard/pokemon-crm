@@ -66,10 +66,10 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
-      <p className="text-sm font-medium text-ink">{title}</p>
-      {description && <p className="max-w-md text-sm text-muted">{description}</p>}
-      {action && <div className="mt-3">{action}</div>}
+    <div className="dex-pokeball-bg flex flex-col items-center justify-center gap-2 px-6 py-14 text-center">
+      <p className="relative text-sm font-medium text-ink">{title}</p>
+      {description && <p className="relative max-w-md text-sm text-muted">{description}</p>}
+      {action && <div className="relative mt-3">{action}</div>}
     </div>
   );
 }
@@ -138,7 +138,7 @@ export function StatTile({
   return (
     <div className="rounded-xl border border-hairline bg-surface px-4 py-3.5">
       <p className="text-xs font-medium text-muted">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tracking-tight text-ink">{value}</p>
+      <p className="dex-mono mt-1 text-2xl font-semibold tracking-tight text-ink">{value}</p>
       {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
     </div>
   );

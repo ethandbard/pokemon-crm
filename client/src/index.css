@@ -37,6 +37,9 @@
   --color-status-critical: #d03b3b;
 
   --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Pokédex-readout face for dex numbers, stat figures and badges — loaded
+     via Google Fonts in index.html, mirroring how notebox loads its faces. */
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
 }
 
 html,
@@ -61,4 +64,75 @@ body {
 
 .recharts-cartesian-grid line {
   stroke: var(--color-hairline);
+}
+
+/*
+ * Restrained Pokédex-device chrome, namespaced `dex-*` (mirrors notebox's
+ * `nb-*`). A handful of decorative touches applied to a few key spots — the
+ * sidebar mark, the Profile's identity card, empty states — not everywhere.
+ */
+
+/* transform + opacity only: compositor-only properties, so this loop never
+   triggers a main-thread repaint the way animating box-shadow would. */
+@keyframes dex-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.35); opacity: 0.5; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* A small pulsing lens light, like a Pokédex's power indicator. */
+.dex-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--color-status-good);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-status-good) 25%, transparent);
+  animation: dex-pulse 2.4s ease-in-out infinite;
+}
+
+/* Pokédex-readout figures — dex numbers, stat totals, tabular data. */
+.dex-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A card styled like a device screen: a wider radius and an inset bezel
+   ring instead of the standard card's flat hairline. Used sparingly — the
+   Profile's identity card, not every card on the page. */
+.dex-screen {
+  border-radius: 20px;
+  box-shadow: inset 0 0 0 4px var(--color-plane);
+}
+
+/* A faint Poké Ball watermark, masked from the ink token so it tracks the
+   surrounding text color instead of carrying its own hex. Anchored to the
+   bottom-right of whatever positioned/overflow-hidden element holds it. */
+.dex-pokeball-bg {
+  position: relative;
+  overflow: hidden;
+}
+.dex-pokeball-bg::after {
+  content: '';
+  position: absolute;
+  right: -36px;
+  bottom: -36px;
+  width: 180px;
+  height: 180px;
+  pointer-events: none;
+  opacity: 0.05;
+  background: var(--color-ink);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='none' stroke='%23000' stroke-width='6'/%3E%3Cpath d='M4 50h30M66 50h30' stroke='%23000' stroke-width='6'/%3E%3Ccircle cx='50' cy='50' r='12' fill='none' stroke='%23000' stroke-width='6'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='none' stroke='%23000' stroke-width='6'/%3E%3Cpath d='M4 50h30M66 50h30' stroke='%23000' stroke-width='6'/%3E%3Ccircle cx='50' cy='50' r='12' fill='none' stroke='%23000' stroke-width='6'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }

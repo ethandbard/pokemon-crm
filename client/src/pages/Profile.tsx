@@ -264,7 +264,12 @@ export function ProfilePage() {
     <div className={PAGE_CONTAINER}>
       <PageHeader
         title={pokemon.displayName}
-        description={`${dexNumber(pokemon.id)} · Generation ${pokemon.generation}`}
+        description={
+          <>
+            <span className="dex-mono">{dexNumber(pokemon.id)}</span> · Generation{' '}
+            {pokemon.generation}
+          </>
+        }
         actions={
           <div className="flex gap-2">
             <Button
@@ -294,7 +299,7 @@ export function ProfilePage() {
       <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)_340px]">
         {/* ---- Left rail: identity, vitals, status flags ---- */}
         <div className="space-y-5">
-          <Card>
+          <Card className="dex-screen">
             <div className="flex flex-col items-center gap-3">
               {artwork ? (
                 <img
